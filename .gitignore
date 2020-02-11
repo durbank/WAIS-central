@@ -37,3 +37,10 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# R markdown output files
+*.pdf
+*.html
+
+# Ignore the data folder, as this contains large files
+data/*
