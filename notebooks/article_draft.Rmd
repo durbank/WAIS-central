@@ -59,7 +59,7 @@ mode.accum = (alpha-1)/beta
 var.accum = alpha/beta^2
 
 # Make df of relevant data in long format
-accum.long = data %>% select(Lat, Lon, elev, Year) %>% 
+accum.long = data %>% dplyr::select(Lat, Lon, elev, Year) %>% 
   mutate(accum = mode.accum, sd = sqrt(var.accum))
 
 # Find duplicate annual accum records and average into single record
@@ -121,7 +121,7 @@ core_long = samba[4:nrow(samba),] %>% rename(Year = Name) %>%
 
 # Recombine accum data in long format with location data and rearrange
 cores.accum = left_join(core_long, core.locs, by = "Site")  %>% arrange(Site, Year) %>% 
-  select(Site, Latitude, Longitude, Elevation, Year, Accum) %>% 
+  dplyr::select(Site, Latitude, Longitude, Elevation, Year, Accum) %>% 
   mutate(Year = as.integer(Year))
 
 # Keep only accumulation years within specified range
@@ -163,6 +163,104 @@ print(cores.plt)
 ## Results
 
 This is where the results will go.
+
+```{r}
+## This code chunk serves to find which REMA DEM 8-meter tiles intersect our dataset 
+## and downloads any tiles not already present in the selected directory "output.dir"
+
+
+# REMA.dir = tk_choose.dir(caption = "Select directory in which to save REMA mosaic tiles")
+REMA.dir = file.path("G:/Research/Antarctica/Data/DEMs/REMA/tiles_8m_v1.1")
+# REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/tiles_8m_v1.1")
+
+# Find all mosaics that intersect the accumulation dataset
+index.file = file.path(dirname(REMA.dir), "REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp")
+dem.index = st_read(index.file)
+# ggplot() + geom_sf(data = Ant.outline, color = 'grey') + geom_sf(data = dem.index)
+keep.idx = unique(unlist(st_intersects(accum.PS, dem.index)))
+mosaic.download = dem.index[keep.idx,] %>% mutate(fileurl = as.character(fileurl))
+
+# Download files from REMA ftp server
+for (file in 1:nrow(mosaic.download)) {
+  tmp.file = tempfile()
+  dir.name = basename(dirname(mosaic.download$fileurl[file]))
+  
+  # If not already downloaded, download tile and extract
+  if (!dir.exists(file.path(REMA.dir, dir.name))) {
+    download.file(mosaic.download$fileurl[file], tmp.file)
+    untar(tmp.file, exdir = file.path(REMA.dir, dir.name))
+  }
+  unlink(tmp.file)
+}
+```
+
+
+
+```{r}
+tic("Raster extraction")
+
+# Function to find which accum points are within a given REMA 8-meter mosaic tile 
+# and extract elevation, slope, and aspect from the REMA raster data
+get_topo_vals = function(tile, accum.pts, tile.dir) {
+  
+  # Logical to filter accum data to those members within the tile extent
+  pts.log = st_intersects(accum.pts, tile, sparse = FALSE)[,1]
+  accum.i = accum.pts %>% filter(pts.log)
+  
+  # Generate file paths to DEM, slope raster and aspect raster
+  dem.path = file.path(tile.dir, as.character(tile$tile), 
+                        paste(as.character(tile$tile), "_8m_dem.tif", sep = ""))
+  slope.path = file.path(tile.dir, as.character(tile$tile), 
+                        paste(as.character(tile$tile), "_8m_slope.tif", sep = ""))
+  aspect.path = file.path(tile.dir, as.character(tile$tile), 
+                        paste(as.character(tile$tile), "_8m_aspect.tif", sep = ""))
+  
+  # Check if slope/aspect rasters exist. If they don't, calculate them from DEM 
+  # and save to REMA directory
+  if (!file.exists(slope.path)) {
+    tile.dem = raster(dem.path)
+    tile.slope = terrain(tile.dem, opt='slope', unit='degrees')
+    writeRaster(tile.slope, filename = slope.path, format = "GTiff")
+    tile.aspect = terrain(tile.dem, opt='aspect', unit='degrees')
+    writeRaster(tile.aspect, filename = aspect.path, format = "GTiff")
+  }
+  
+  # Generate raster stack of DEM, slope, and aspect 
+  # and extract raster values at accum points
+  tile.stack = stack(list(dem.path, slope.path, aspect.path))
+  stack.vals = extract(tile.stack, accum.i)
+  
+  # Get index values of accum data subset within the global accum dataset
+  pts.idx = (1:length(pts.log))[pts.log]
+  
+  # Return index positions and raster stack values as list object
+  return(list(pts.idx, stack.vals))
+}
+
+# Add variables for REMA elevation, slope, and aspect
+accum.PS = accum.PS %>% mutate(elev.REMA = NA, slope = NA, aspect = NA)
+
+for (i in 1:nrow(mosaic.download)) {
+  
+  # Get current tile with coverage in dataset
+  tile = mosaic.download[i,]
+  
+  # Calculate and extract elevation, slope, and aspect
+  vals.list = get_topo_vals(tile, accum.PS, REMA.dir)
+  topo.idx = vals.list[[1]]
+  topo.vals = vals.list[[2]]
+  
+  # Assign topo values to accum tbl
+  accum.PS$elev.REMA[topo.idx] = topo.vals[,1]
+  accum.PS$slope[topo.idx] = topo.vals[,2]
+  accum.PS$aspect[topo.idx] = topo.vals[,3]
+}
+
+
+toc()
+```
+
+
 
 ```{r, echo=FALSE, message=FALSE}
 # Find the mean accumulation at each data location across all years (this method strips NA 
@@ -260,14 +358,14 @@ accum.lm_loc = map(accum.loc_PS$data, ~ lm(accum ~ Year, data = .x, weights = 1/
 # Another approach could be to perform linear fits of each time series over a ?10?-year moving window
 
 # Extract relevant model data and store in nested tibble
-accum.loc_data = select(accum.loc_PS, -data, -accum_mu) %>% 
+accum.loc_data = dplyr::select(accum.loc_PS, -data, -accum_mu) %>% 
   mutate(data = map(accum.lm_loc, 
-                    ~ select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
+                    ~ dplyr::select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
 
 # Extract model parameter estimates and p values and store as location-based tibble
 tmp.tidy = map(accum.lm_loc, ~ tidy(.x))
 trend.loc = accum.loc_PS %>% 
-  select(Easting, Northing, elev, accum_mu) %>% 
+  dplyr::select(Easting, Northing, elev, accum_mu) %>% 
   mutate(intrcpt = simplify(map(tmp.tidy, "estimate") %>% map(1))) %>%
   mutate(coeff_yr = simplify(map(tmp.tidy, "estimate") %>% map(2))) %>% 
   mutate(std.err = simplify(map(tmp.tidy, "std.error") %>% map(2))) %>% 
@@ -279,14 +377,14 @@ trend.loc = accum.loc_PS %>%
 cores.lm_loc = map(cores.loc_PS$Data, ~ lm(Accum ~ Year, data = .x))
 
 # Extract relevant model data and store in nested tibble
-cores.loc_data = select(cores.loc_PS, -Data, -accum_mu, -data.length) %>% 
+cores.loc_data = dplyr::select(cores.loc_PS, -Data, -accum_mu, -data.length) %>% 
   mutate(data = map(cores.lm_loc, 
-                    ~ select(augment(.), Year, Accum, .fitted, .se.fit, .resid, .std.resid)))
+                    ~ dplyr::select(augment(.), Year, Accum, .fitted, .se.fit, .resid, .std.resid)))
 
 # Extract model parameter estimates and p values and store as location-based tibble
 tmp.tidy = map(cores.lm_loc, ~ tidy(.x))
 cores.trend = cores.loc_PS %>% 
-  select(Site, Easting, Northing, Elevation, accum_mu) %>% 
+  dplyr::select(Site, Easting, Northing, Elevation, accum_mu) %>% 
   mutate(intrcpt = simplify(map(tmp.tidy, "estimate") %>% map(1))) %>%
   mutate(coeff_yr = simplify(map(tmp.tidy, "estimate") %>% map(2))) %>% 
   mutate(std.err = simplify(map(tmp.tidy, "std.error") %>% map(2))) %>% 
@@ -327,9 +425,9 @@ test = filter(accum.loc_PS, Northing < -4.5E5 & Easting < -1.2E6)
 test.smp = test %>% sample_n(size = 250)
 test.lm = map(test.smp$data, ~ lm(accum ~ Year, data = .x, weights = 1/sd^2))
 
-test.data = select(test.smp, -data, -accum_mu) %>% 
+test.data = dplyr::select(test.smp, -data, -accum_mu) %>% 
   mutate(data = map(test.lm, 
-                    ~ select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
+                    ~ dplyr::select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
 
 tmp.tidy = map(test.lm, ~ tidy(.x))
 test.smp = test.smp %>% 
@@ -348,45 +446,6 @@ ggplot(test2, aes(Year, accum)) + geom_line(aes(group = Easting, color = factor(
 ### Comparison of mean accumulation and slope
 
 This section uses 8-meter mosaic tiles from the Reference Elevation Model of Antarctica (REMA) to compare mean accumulation rate to surface slope [@howat_reference_2019].
-
-
-```{r}
-# Find all mosaics that intersect the accumulation dataset
-index.file = "/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp"
-dem.index = st_read(index.file)
-ggplot() + geom_sf(data = Ant.outline, color = 'grey') + geom_sf(data = dem.index)
-keep.idx = unique(unlist(st_intersects(accum.PS, dem.index)))
-mosaic.download = dem.index[keep.idx,] %>% mutate(fileurl = as.character(fileurl))
-
-# output.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/WAIS_divide")
-output.dir = tk_choose.dir(caption = "Select directory in which to save REMA mosaic tiles")
-
-# Download files from REMA ftp server
-for (file in 1:nrow(mosaic.download)) {
-  tmp.file = tempfile()
-  dir.name = basename(dirname(mosaic.download$fileurl[file]))
-  # dir.create(file.path(output.dir, dir.name))
-  
-  # If not already downloaded, download tile and extract
-  if (!dir.exists(file.path(output.dir, dir.name))) {
-    download.file(mosaic.download$fileurl[file], tmp.file)
-    untar(tmp.file, exdir = file.path(output.dir, dir.name))
-  }
-  unlink(tmp.file)
-}
-```
-
-
-
-```{r}
-# tic("Raster analysis")
-# 
-# dem.file = "/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/WAIS_divide/r.slope.tif"
-# dem.slope = raster(dem.file)
-# accum.loc_PS = accum.loc_PS %>% mutate(slope = extract(dem.slope, accum.PS))
-# 
-# toc()
-```
 
 
 
