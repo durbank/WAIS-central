@@ -1,9 +1,11 @@
 ---
 title: "Ch. 2 Dissertation draft"
-output: html_notebook
-bibliography: ../docs/citations.bib
-link-citations: yes
 csl: ../docs/american-geophysical-union.csl
+link-citations: yes
+output:
+  html_document:
+    df_print: paged
+bibliography: ../docs/citations.bib
 ---
 
 ## README
@@ -20,136 +22,48 @@ This is where the introduction will go.
 This is where the methods will go.
 
 ```{r, echo=FALSE, message=FALSE}
+
 # Attach required packages
 library(tidyverse)
 library(here)
 library(sf)
 library(tcltk)
 library(readxl)
-library(broom)
-library(rgdal)
-library(raster)
 library(tictoc)
 
 tic("Total runtime")
 
-# Function to import all .csv files of long format PAIPR results from a given directory, and
-# concatenate the results into a single tibble
-import_PAIPR = function(input_dir) {
-  files = list.files(input_dir, pattern = "*.csv", full.names = TRUE)
-  data = tibble()
-  for (f in files) {
-    data_f = read_csv(f)
-    data = rbind(data, data_f)
-  }
-  return(data)
-}
-
-tic("PAIPR data import")
-
-# Import and format PAIPR-generated SMB results
-data = import_PAIPR( here("data/gamma_20111109"))
-data$Year = as.integer(data$Year)
-
-# Generate descriptive statistics based on imported gamma-fitted parameters
-alpha = data$gamma_shape
-alpha[which(alpha<1)] = 1
-beta = 1/data$gamma_scale
-mode.accum = (alpha-1)/beta
-var.accum = alpha/beta^2
-
-# Make df of relevant data in long format
-accum.long = data %>% dplyr::select(Lat, Lon, elev, Year) %>% 
-  mutate(accum = mode.accum, sd = sqrt(var.accum))
-
-# Find duplicate annual accum records and average into single record
-accum.long = accum.long %>% group_by(Lat, Lon, elev, Year) %>%
-  summarise(accum = mean(accum, na.rm = TRUE), sd = mean(sd, na.rm = TRUE)) %>% ungroup()
-
-# This removes years prior to a cutoff, and clips the results to only time series that extend to cutoff
-yr.first = 1985
-yr.last = 2007
-accum.long = accum.long %>% filter(Year>=yr.first) %>% filter(Year <= yr.last)
-data.cutoff = accum.long %>% group_by(Lat, Lon) %>% summarise(yr.start = min(Year))
-
-# Nest year/accum data into list-columns for each location  (insert # prior to "filter" pipe to avoid cutoff)
-accum.loc = nest(accum.long, data = c(Year, accum, sd)) %>% filter(data.cutoff$yr.start <= yr.first)
-rm(data, data.cutoff, alpha, beta, mode.accum, var.accum)
-
-toc()
-```
+# Import accumulation data results
+accum.PS = read_rds(here("data/interim_results/accum_data.rds"))
+cores.PS = read_rds(here("data/interim_results/core_data.rds"))
 
 
-```{r, echo=FALSE, message=FALSE}
-# Create sf point object, where each row has a unique XYZ coordinate in space, with associated list-columns for the geometry and data variables
-accum.sf = st_as_sf(accum.loc, coords = c("Lon", "Lat"), dim = "XY")
+# # Code to export data as .csv for use in Python
+# accum.exp = accum.PS %>% 
+#   mutate(trace_ID = 0:(nrow(accum.PS)-1), Easting=st_coordinates(.)[,1], 
+#          Northing=st_coordinates(.)[,2]) %>%
+#   st_drop_geometry() %>% unnest(cols = data) %>% 
+#   select(trace_ID, Easting, Northing, everything())
+# cores.exp = cores.PS %>%
+#   mutate(Easting=st_coordinates(.)[,1], Northing=st_coordinates(.)[,2]) %>%
+#   st_drop_geometry() %>% unnest(cols = Data) %>% select(Site, Easting, Northing, everything())
+# write_csv(accum.exp, '/home/durbank/Documents/Research/Antarctica/WAIS-wind/data/R-trends/accum.csv')
+# write_csv(cores.exp, '/home/durbank/Documents/Research/Antarctica/WAIS-wind/data/R-trends/cores.csv')
 
-# Define the coordinate reference system used in original data
-st_crs(accum.sf) = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84"
+# Filter accumulation data
+accum.PS = accum.PS %>% filter(elev.REMA > 0) %>% 
+  filter(slope < 2)
 
 # Import basin shapefiles (in Antarctic Polar Sterographic EPSG:3031)
 basins = st_read(here("data/ANT_Basins_IMBIE2_v1.6/ANT_Basins_IMBIE2_v1.6.shp"))
 
-# Transform SMB sf object into APS projection
-accum.PS = accum.sf %>% st_transform(st_crs(basins))
-rm(accum.sf)
-```
-
-
-```{r}
 # Import Antarctic outline
 Ant.outline = st_read(here("data/Ant_basemap/Coastline_medium_res_polygon.shp"))
-
-# Import the SAMBA database from .xlsx file
-samba = read_excel(here("data/DGK_SMB_compilation.xlsx"), 
-                   sheet = "Accumulation", na = c("", "NAN", "NaN"))
-
-# Remove columns with  no data
-keep.idx = function(x) any(!is.na(x))
-samba = samba %>% select_if(keep.idx)
-
-# Create tbl of Site locations
-core.locs = tibble(Site = colnames(samba[,2:ncol(samba)]), 
-                   Latitude = as.numeric(samba[1,2:ncol(samba)]), 
-                   Longitude = as.numeric(samba[2,2:ncol(samba)]), 
-                   Elevation = as.numeric(samba[3,2:ncol(samba)]))
-
-# Convert samba database to long format and rm NA values
-core_long = samba[4:nrow(samba),] %>% rename(Year = Name) %>% 
-  pivot_longer(-Year, names_to = "Site", values_to = "Accum") %>% 
-  filter(!is.na(Accum))
-
-# Recombine accum data in long format with location data and rearrange
-cores.accum = left_join(core_long, core.locs, by = "Site")  %>% arrange(Site, Year) %>% 
-  dplyr::select(Site, Latitude, Longitude, Elevation, Year, Accum) %>% 
-  mutate(Year = as.integer(Year))
-
-# Keep only accumulation years within specified range
-cores.accum = cores.accum %>% filter(Year >= yr.first) %>% filter(Year <= yr.last)
-
-# This clips the results to only time series that extend to a selected year
-cores.cutoff = cores.accum %>% group_by(Site) %>% 
-  summarise(yr.start = min(Year))
-
-# Nest year/accum data into list-columns for each location  (insert # prior to "filter" pipe to avoid cutoff)
-tmp.nest = nest(cores.accum, Data = c(Year, Accum)) %>% filter(cores.cutoff$yr.start <= yr.first)
-
-# Add column for the length of Data records and remove cores shorter than 75% of given duration
-cores.nest = mutate(tmp.nest, data.length = unlist(lapply(tmp.nest$Data, nrow))) %>% 
-  filter(data.length >= (0.75*(yr.last-yr.first)))
-
-# Convert to simple feature object
-cores.PS = cores.nest %>% 
-  st_as_sf(coords = c("Longitude", "Latitude"), dim = "XY", 
-           crs = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84") %>%
-  st_transform(st_crs(Ant.outline))
-rm(samba, keep.idx, core_long, tmp.nest)
 ```
 
+Below is a reference map showing the location of our data within the greater context of Antarctica.
 
 ```{r, fig_inset, echo=FALSE}
-# Crop cores to chosen spatial extent
-cores.PS = cores.PS %>% st_crop(xmin=-1.5e6, xmax=-8e5, ymin=-7e5, ymax=1e5)
 
 # Plot of current Antarctic cores (blue) and soon-to-be-added (red)
 cores.plt = ggplot(cores.PS) + geom_sf(data = Ant.outline, color = 'grey') +
@@ -164,118 +78,13 @@ print(cores.plt)
 
 This is where the results will go.
 
-```{r}
-## This code chunk serves to find which REMA DEM 8-meter tiles intersect our dataset 
-## and downloads any tiles not already present in the selected directory "output.dir"
-
-
-# REMA.dir = tk_choose.dir(caption = "Select directory in which to save REMA mosaic tiles")
-REMA.dir = file.path("G:/Research/Antarctica/Data/DEMs/REMA/tiles_8m_v1.1")
-# REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/tiles_8m_v1.1")
-
-# Find all mosaics that intersect the accumulation dataset
-index.file = file.path(dirname(REMA.dir), "REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp")
-dem.index = st_read(index.file)
-# ggplot() + geom_sf(data = Ant.outline, color = 'grey') + geom_sf(data = dem.index)
-keep.idx = unique(unlist(st_intersects(accum.PS, dem.index)))
-mosaic.download = dem.index[keep.idx,] %>% mutate(fileurl = as.character(fileurl))
-
-# Download files from REMA ftp server
-for (file in 1:nrow(mosaic.download)) {
-  tmp.file = tempfile()
-  dir.name = basename(dirname(mosaic.download$fileurl[file]))
-  
-  # If not already downloaded, download tile and extract
-  if (!dir.exists(file.path(REMA.dir, dir.name))) {
-    download.file(mosaic.download$fileurl[file], tmp.file)
-    untar(tmp.file, exdir = file.path(REMA.dir, dir.name))
-  }
-  unlink(tmp.file)
-}
-```
-
-
-
-```{r}
-tic("Raster extraction")
-
-# Function to find which accum points are within a given REMA 8-meter mosaic tile 
-# and extract elevation, slope, and aspect from the REMA raster data
-get_topo_vals = function(tile, accum.pts, tile.dir) {
-  
-  # Logical to filter accum data to those members within the tile extent
-  pts.log = st_intersects(accum.pts, tile, sparse = FALSE)[,1]
-  accum.i = accum.pts %>% filter(pts.log)
-  
-  # Generate file paths to DEM, slope raster and aspect raster
-  dem.path = file.path(tile.dir, as.character(tile$tile), 
-                        paste(as.character(tile$tile), "_8m_dem.tif", sep = ""))
-  slope.path = file.path(tile.dir, as.character(tile$tile), 
-                        paste(as.character(tile$tile), "_8m_slope.tif", sep = ""))
-  aspect.path = file.path(tile.dir, as.character(tile$tile), 
-                        paste(as.character(tile$tile), "_8m_aspect.tif", sep = ""))
-  
-  # Check if slope/aspect rasters exist. If they don't, calculate them from DEM 
-  # and save to REMA directory
-  if (!file.exists(slope.path)) {
-    tile.dem = raster(dem.path)
-    tile.slope = terrain(tile.dem, opt='slope', unit='degrees')
-    writeRaster(tile.slope, filename = slope.path, format = "GTiff")
-    tile.aspect = terrain(tile.dem, opt='aspect', unit='degrees')
-    writeRaster(tile.aspect, filename = aspect.path, format = "GTiff")
-  }
-  
-  # Generate raster stack of DEM, slope, and aspect 
-  # and extract raster values at accum points
-  tile.stack = stack(list(dem.path, slope.path, aspect.path))
-  stack.vals = extract(tile.stack, accum.i)
-  
-  # Get index values of accum data subset within the global accum dataset
-  pts.idx = (1:length(pts.log))[pts.log]
-  
-  # Return index positions and raster stack values as list object
-  return(list(pts.idx, stack.vals))
-}
-
-# Add variables for REMA elevation, slope, and aspect
-accum.PS = accum.PS %>% mutate(elev.REMA = NA, slope = NA, aspect = NA)
-
-for (i in 1:nrow(mosaic.download)) {
-  
-  # Get current tile with coverage in dataset
-  tile = mosaic.download[i,]
-  
-  # Calculate and extract elevation, slope, and aspect
-  vals.list = get_topo_vals(tile, accum.PS, REMA.dir)
-  topo.idx = vals.list[[1]]
-  topo.vals = vals.list[[2]]
-  
-  # Assign topo values to accum tbl
-  accum.PS$elev.REMA[topo.idx] = topo.vals[,1]
-  accum.PS$slope[topo.idx] = topo.vals[,2]
-  accum.PS$aspect[topo.idx] = topo.vals[,3]
-}
-
-
-toc()
-```
-
 
 
 ```{r, echo=FALSE, message=FALSE}
-# Find the mean accumulation at each data location across all years (this method strips NA 
-# values first, so the exact temporal range differs by location)
-accum.PS = accum.PS %>% 
-  mutate(accum_mu = simplify(map(data, ~ mean(.x$accum, na.rm = TRUE))))
 
 # Create non-referenced tibble of accumulation by location
 accum.loc_PS = as_tibble(st_coordinates(accum.PS)) %>%
   rename(Easting = X, Northing = Y) %>% bind_cols(st_set_geometry(accum.PS, NULL))
-
-# Find the mean accumulation at each core location across all years (this method strips NA 
-# values first, so the exact temporal range differs by location)
-cores.PS = cores.PS %>% 
-  mutate(accum_mu = simplify(map(Data, ~ mean(.x$Accum, na.rm = TRUE))))
 
 # Create non-referenced tibble of core accumulation by location
 cores.loc_PS = as_tibble(st_coordinates(cores.PS)) %>%
@@ -295,121 +104,17 @@ accum.plt1 = ggplot(accum.loc_PS, aes(x = Easting, y = Northing, color = accum_m
 print(accum.plt1)
 ```
 
-
-Tests with bootstrapping to better constrain regression parameters (but currently too computationally expensive for the data set).
-
-```{r}
-
-
-# library(car)
-# test = accum.loc_PS %>% sample_n(size=1000)
-# test$trend = NA
-# test$bias = NA
-# test$St.err = NA
-# test$conf2.5 = NA
-# test$conf97.5 = NA
-# # test$r2 = NA
-# tic("Bootstrap timer:")
-# for (i in 1:nrow(test)) {
-#   data.i = test$data[[i]]
-#   lm.i = lm(accum ~ Year, data = data.i, weights = 1/sd^2)
-#   # bs = function(formula, data, indices) {
-#   #   data_smp = data[indices,]
-#   #   fit = lm(accum ~ Year, data=data_smp, weights = 1/sd^2)
-#   #   return(coef(fit))
-#   # }
-#   # boot.i = boot(data=data.i, statistic=bs, R=1000)
-#   boot.i = Boot(lm.i, R=200, ncores = 4)
-#   boot.sum = summary(boot.i)
-#   boot.conf = confint(boot.i)
-#   
-#   test$trend[i] = boot.sum$original[2]
-#   test$bias[i] = boot.sum$bootBias[2]
-#   test$St.err[i] = boot.sum$bootSE[2]
-#   test$conf2.5[i] = boot.conf[2,1]
-#   test$conf97.5[i] = boot.conf[2,2]
-# }
-# toc()
-# 
-# # test.lm = lm(accum ~ Year, data = test$data[[1]], weights = 1/sd^2)
-# # test.boot = Boot(test.lm)
-# # summary(test.boot)
-# # 
-# # test.lm = map(test$data, ~ lm(accum ~ Year, data = .x, weights = 1/sd^2))
-# # 
-# # boot.fun = function(x)  Boot(x, R=500)
-# # test.boot = lapply(test.lm, boot.fun)
-# # 
-# # test.boot = test.lm %>% map(function(x) Boot(x, R=500))
-
-```
-
-
-
-```{r}
-
-tic("Time series regressions")
-# Create linear models for time series at each location in data
-accum.lm_loc = map(accum.loc_PS$data, ~ lm(accum ~ Year, data = .x, weights = 1/sd^2))
-
-# I should correct significance values based on autocorrelation in the data
-# It would be interesting to investigate the 2nd derivative in the data (the trend through time of the trend). 
-# One approach to this would be to fit a line through each time series, but iteratively shorten the time series. In this way, I can see if the trend changes (e.g. accelerates) during recent years.
-# Another approach could be to perform linear fits of each time series over a ?10?-year moving window
-
-# Extract relevant model data and store in nested tibble
-accum.loc_data = dplyr::select(accum.loc_PS, -data, -accum_mu) %>% 
-  mutate(data = map(accum.lm_loc, 
-                    ~ dplyr::select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
-
-# Extract model parameter estimates and p values and store as location-based tibble
-tmp.tidy = map(accum.lm_loc, ~ tidy(.x))
-trend.loc = accum.loc_PS %>% 
-  dplyr::select(Easting, Northing, elev, accum_mu) %>% 
-  mutate(intrcpt = simplify(map(tmp.tidy, "estimate") %>% map(1))) %>%
-  mutate(coeff_yr = simplify(map(tmp.tidy, "estimate") %>% map(2))) %>% 
-  mutate(std.err = simplify(map(tmp.tidy, "std.error") %>% map(2))) %>% 
-  mutate(p.val_yr = simplify(map(tmp.tidy, "p.value") %>% map(2)))
-
-##### Same thing as above, but for the cores
-
-# Create linear models for time series at each location in data
-cores.lm_loc = map(cores.loc_PS$Data, ~ lm(Accum ~ Year, data = .x))
-
-# Extract relevant model data and store in nested tibble
-cores.loc_data = dplyr::select(cores.loc_PS, -Data, -accum_mu, -data.length) %>% 
-  mutate(data = map(cores.lm_loc, 
-                    ~ dplyr::select(augment(.), Year, Accum, .fitted, .se.fit, .resid, .std.resid)))
-
-# Extract model parameter estimates and p values and store as location-based tibble
-tmp.tidy = map(cores.lm_loc, ~ tidy(.x))
-cores.trend = cores.loc_PS %>% 
-  dplyr::select(Site, Easting, Northing, Elevation, accum_mu) %>% 
-  mutate(intrcpt = simplify(map(tmp.tidy, "estimate") %>% map(1))) %>%
-  mutate(coeff_yr = simplify(map(tmp.tidy, "estimate") %>% map(2))) %>% 
-  mutate(std.err = simplify(map(tmp.tidy, "std.error") %>% map(2))) %>% 
-  mutate(p.val_yr = simplify(map(tmp.tidy, "p.value") %>% map(2)))
-
-# Scale trend values by the mean in-situ accumulation rate
-trend.scaled = trend.loc %>% mutate(coeff_yr = coeff_yr/accum_mu, 
-                                    std.err = std.err/accum_mu)
-cores.scaled = cores.trend %>% mutate(coeff_yr = coeff_yr/accum_mu, 
-                                      std.err = std.err/accum_mu)
-
-rm(accum.lm_loc, accum.loc_data, cores.lm_loc, cores.loc_data, tmp.tidy)
-toc()
-```
-
+Above we see how mean accumulation rates vary over the region of interest.
 
 ```{r, trend_map, echo=FALSE}
 # Plot scaled trends significant at 95% CL
-trend.map = ggplot(trend.scaled, aes(x = Easting, y = Northing)) + 
-  geom_point(aes(color = 100*coeff_yr)) + 
-  geom_point(data = filter(trend.scaled, p.val_yr < 0.05) %>% sample_n(2000), 
+trend.map = ggplot(accum.loc_PS, aes(x = Easting, y = Northing)) + 
+  geom_point(aes(color = 100*coeff_perc)) + 
+  geom_point(data = filter(accum.loc_PS, p.val_yr < 0.05) %>% sample_n(2000), 
              aes(x=Easting, y=Northing), shape = 4, color = 'black', size = 0.05) + 
-  geom_point(data = cores.scaled, 
-             aes(x = Easting, y = Northing, color = 100*coeff_yr), shape = 8, size = 3) + 
-  geom_point(data = filter(cores.scaled, p.val_yr < 0.05), 
+  geom_point(data = cores.loc_PS, 
+             aes(x = Easting, y = Northing, color = 100*coeff_perc), shape = 8, size = 3) + 
+  geom_point(data = filter(cores.loc_PS, p.val_yr < 0.05), 
              aes(x=Easting, y=Northing), shape = 4, color = 'black', size = 0.05) + 
   lims(x = c(-1.5e6,-9e5), y = c(-6e5,0.35e5)) +
   scale_colour_gradient2() +
@@ -418,35 +123,101 @@ trend.map = ggplot(trend.scaled, aes(x = Easting, y = Northing)) +
 print(trend.map)
 ```
 
+Above we see how the linear time series trend in annual accumulation rate varies spatially across the region of interest.
 
 ```{r}
-test = filter(accum.loc_PS, Northing < -4.5E5 & Easting < -1.2E6)
-
-test.smp = test %>% sample_n(size = 250)
-test.lm = map(test.smp$data, ~ lm(accum ~ Year, data = .x, weights = 1/sd^2))
-
-test.data = dplyr::select(test.smp, -data, -accum_mu) %>% 
-  mutate(data = map(test.lm, 
-                    ~ dplyr::select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
-
-tmp.tidy = map(test.lm, ~ tidy(.x))
-test.smp = test.smp %>% 
-  mutate(coeff_yr = simplify(map(tmp.tidy, "estimate") %>% map(2))) %>% 
-  mutate(std.err = simplify(map(tmp.tidy, "std.error") %>% map(2))) %>% 
-  mutate(p.val_yr = simplify(map(tmp.tidy, "p.value") %>% map(2)))
-
-
-test2 = test.smp %>% sample_n(size = 10) %>% unnest(cols = c(data))
-
-ggplot(test2, aes(Year, accum)) + geom_line(aes(group = Easting, color = factor(Easting)))
+# test = filter(accum.loc_PS, Northing < -4.5E5 & Easting < -1.2E6)
+# 
+# test.smp = test %>% sample_n(size = 250)
+# test.lm = map(test.smp$data, ~ lm(accum ~ Year, data = .x, weights = 1/sd^2))
+# 
+# test.data = dplyr::select(test.smp, -data, -accum_mu) %>% 
+#   mutate(data = map(test.lm, 
+#                     ~ dplyr::select(augment(.), Year, accum, .fitted, .se.fit, .resid, .std.resid)))
+# 
+# tmp.tidy = map(test.lm, ~ tidy(.x))
+# test.smp = test.smp %>% 
+#   mutate(coeff_yr = simplify(map(tmp.tidy, "estimate") %>% map(2))) %>% 
+#   mutate(std.err = simplify(map(tmp.tidy, "std.error") %>% map(2))) %>% 
+#   mutate(p.val_yr = simplify(map(tmp.tidy, "p.value") %>% map(2)))
+# 
+# 
+# test2 = test.smp %>% sample_n(size = 10) %>% unnest(cols = c(data))
+# 
+# ggplot(test2, aes(Year, accum)) + geom_line(aes(group = Easting, color = factor(Easting)))
 
 ```
 
 
-### Comparison of mean accumulation and slope
+## Comparison of mean accumulation and slope
 
 This section uses 8-meter mosaic tiles from the Reference Elevation Model of Antarctica (REMA) to compare mean accumulation rate to surface slope [@howat_reference_2019].
 
+### Exploratory analyses
+
+```{r, message=FALSE}
+library(GGally)
+
+ggpairs(select(accum.loc_PS, Easting, Northing, elev.REMA, slope, aspect, accum_mu))
+
+accum_lm = lm(accum_mu ~ Easting + Northing + elev.REMA + slope + aspect, data = accum.loc_PS)
+summary(accum_lm)
+
+
+
+core.accum_lm = lm(accum_mu ~ Easting + Northing + Elevation, data = cores.loc_PS)
+
+```
+
+Although all of the included predictors show significant effects on `accum_mu`, the dominant influences on the region-wide trends are concentrated in the spatial components.
+Interestingly, elevation shows residual influence on the predictions after accounting it's covariance in x-y space.
+The following model summarizes these results for the dominant influences.
+
+```{r}
+summary(lm(accum_mu ~ Easting + Northing + elev.REMA, data = accum.loc_PS))
+```
+
+We can see that by excluding `slope` and `aspect` from the analysis the model remains virtually the same.
+The coefficients for the remaining predictors are very similar as are the p-values.
+The new $r^2 = 0.6453$ a neglibible difference from the first model.
+
+The model suggests higher Easting and Northing values (in this case moving south and east respectively) leads to lower accumulation rates, which fits our intuition.
+The model further suggests that, after accounting for the covariance of elevation with position, higher elevation sites experience higher accumulation rates. **[What does this mean?]**
+
+### Spatial models
+
+Just because Easting, Northing, and elevation dominate the regional trends does not mean slope and aspect are insignificant.
+We therefore utilize spatial regression modeling with slope and aspect to investigate the more localized effects of these two predictors.
+
+```{r, message=FALSE}
+
+# test.data = st_crop(accum.PS, c(xmin=-1.4E6, xmax=(-1.4E6 + 50000), ymin=-5E5, ymax=-4.5E5))
+test.data = filter(accum.loc_PS, Easting >= -1.3E6 & Easting <= (-1.3E6+30000)) %>% 
+  filter(Northing >= -5E5 & Northing <= -4.5E5)
+data.lm = lm(accum_mu ~ Easting + Northing + elev.REMA + slope + aspect, data=test.data)
+
+summary(data.lm)
+
+ggpairs(select(test.data, Easting, Northing, elev.REMA, slope, aspect, accum_mu))
+ggplot(test.data, aes(x=Easting, y=Northing)) + 
+  geom_point((aes(color=accum_mu))) + scale_color_viridis_c()
+```
+
+
+If we look at the residuals, most don't show additional signal, expect for the East/West spatial components. 
+These still show cyclic variations in mean accumulation rates (I would assume lining up with the undulations expressed in the echograms).
+The below plot shows residuals plotted against Easting as an example of this.
+
+```{r}
+plot(test.data$Easting, residuals(data.lm))
+```
+
+
+### Spatial analysis on individual years
+
+In addition to looking at the mean aggregate accumulation relationships, I should also look at those relationships on the range of individual years (to determine the degree of noise injected by annual fluctuations).
+Bear in mind that I will not have predictors at annual resolution.
+This may not matter for some predictors (Easting, Northing, maybe elevation) but could be significant for others (slope and aspect?).
 
 
 ```{r}
