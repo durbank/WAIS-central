@@ -44,3 +44,6 @@ vignettes/*.pdf
 
 # Ignore the data folder, as this contains large files
 data/*
+
+# Ignore tmp Python and Jupyter notebooks
+*.ipynb
