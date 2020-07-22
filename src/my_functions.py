@@ -7,6 +7,8 @@ import geopandas as gpd
 from pathlib import Path
 import time
 from sklearn.neighbors import BallTree
+import holoviews as hv
+hv.extension('bokeh')
 
 # # Set project root directory
 # ROOT_DIR = Path(__file__).parent.parent
@@ -44,9 +46,9 @@ def format_PAIPR(data_raw, start_yr, end_yr):
     data = data.query(
         f"Year >= {start_yr} & Year <= {end_yr}")
 
-    # Ensure each trace has only one time series 
-    # (if not, take the mean of all time series)
-    data = data.groupby(['trace_ID', 'Year']).mean()
+    # # Ensure each trace has only one time series 
+    # # (if not, take the mean of all time series)
+    # data = data.groupby(['trace_ID', 'Year']).mean()
 
     # Generate descriptive statistics based on imported 
     # gamma-fitted parameters
@@ -58,11 +60,14 @@ def format_PAIPR(data_raw, start_yr, end_yr):
 
     # New df (in long format) with accum data assigned
     data_long = (
-        data.filter(['trace_ID', 'QC_flag', 'Lat', 
-        'Lon', 'elev', 'Year']).assign(
+        data.filter(['trace_ID', 'collect_time', 
+        'QC_flag', 'Lat', 'Lon', 
+        'elev', 'Year']).assign(
             accum=mode_accum, std=np.sqrt(var_accum))
         .reset_index()
     )
+    data_long['collect_time'] = pd.to_datetime(
+        data_long['collect_time'])
     return data_long
 
 def get_nearest(
@@ -79,10 +84,15 @@ def get_nearest(
     distances = distances.transpose()
     indices = indices.transpose()
 
-    # Get closest indices and distances (i.e. array at index 0)
-    # note: for the second closest points, you would take index 1, etc.
-    closest = indices[0]
-    closest_dist = distances[0]
+    if k_neighbors==2:
+        # Select 2nd closest (as first closest will be the same point)
+        closest = indices[1]
+        closest_dist = distances[1]
+    else:
+        # Get closest indices and distances (i.e. array at index 0)
+        # note: for the second closest points, you would take index 1, etc.
+        closest = indices[0]
+        closest_dist = distances[0]
 
     # Return indices and distances
     return (closest, closest_dist)
@@ -116,7 +126,9 @@ def nearest_neighbor(left_gdf, right_gdf, return_dist=False, planet_radius=63710
     # closest ==> index in right_gdf that corresponds to the closest point
     # dist ==> distance between the nearest neighbors (in meters)
 
-    closest, dist = get_nearest(src_points=left_radians, candidates=right_radians)
+    closest, dist = get_nearest(
+        src_points=left_radians, 
+        candidates=right_radians)
 
     # Return points from right GeoDataFrame that are closest to points in left GeoDataFrame
     closest_points = right.loc[closest]
@@ -132,9 +144,82 @@ def nearest_neighbor(left_gdf, right_gdf, return_dist=False, planet_radius=63710
     return closest_points
 
 
+def get_Xovers(
+    gdf_Xover, gdf_candidates, cutoff_dist):
+    """
+    Function to extract crossover locations (within a cutoff distance) and return traceID values at those locations. 
 
+    NOTE: Assumes that input gdf is for Antarctica.
+    """
 
+    gdf_Xover = gdf_Xover.to_crs("EPSG:3031")
+    gdf_candidates = gdf_candidates.to_crs(
+        "EPSG:3031")
+    
+    gdf_Xover['geometry'] = gdf_Xover.buffer(
+        cutoff_dist)
 
+    candidate_near = gpd.sjoin(
+        gdf_candidates, gdf_Xover).drop(
+            columns=['index_right'])
+    
+    Xover_idx1 = candidate_near.collect_time.argmax()
+    Xover_idx2 = candidate_near.collect_time.argmin()
+    trace_ID1 = candidate_near['trace_ID'].iloc[
+        Xover_idx1]
+    trace_ID2 = candidate_near['trace_ID'].iloc[
+        Xover_idx2]
+
+    t_delta = (
+        candidate_near.collect_time.max() 
+        - candidate_near.collect_time.min()
+    )
+    print(f"Time difference between traces is {t_delta}")
+
+    return trace_ID1, trace_ID2
+
+def plot_Xover(
+    accum_data, std_data, ts_trace1, ts_trace2):
+
+    """
+    Function to generate plot objects comparing the time series of two cross-over locations of the same flightline.
+    """
+
+    ts1 = pd.DataFrame(
+        {'accum': accum_data[ts_trace1], 
+        'upper': accum_data[ts_trace1] 
+            + std_data[ts_trace1], 
+        'lower': accum_data[ts_trace1] 
+            - std_data[ts_trace1]})
+    ts2 = pd.DataFrame(
+        {'accum': accum_data[ts_trace2], 
+        'upper': accum_data[ts_trace2] 
+            + std_data[ts_trace2], 
+        'lower': accum_data[ts_trace2] 
+            - std_data[ts_trace2]})
+
+    plt_ts1 = (
+        hv.Curve(data=ts1, 
+            kdims=['Year', 'accum']).opts(
+            color='blue', line_width=2) 
+        * hv.Curve(data=ts1, 
+        kdims=['Year','upper']).opts(
+            color='blue', line_dash='dotted') 
+        * hv.Curve(data=ts1, 
+            kdims=['Year','lower']).opts(
+            color='blue', line_dash='dotted'))
+    plt_ts2 = (
+        hv.Curve(data=ts2, 
+            kdims=['Year', 'accum']).opts(
+            color='red', line_width=2) 
+        * hv.Curve(data=ts2, 
+        kdims=['Year','upper']).opts(
+            color='red', line_dash='dotted') 
+        * hv.Curve(data=ts2, 
+            kdims=['Year','lower']).opts(
+            color='red', line_dash='dotted'))
+    
+    return plt_ts1, plt_ts2
 
 def trend_bs(df, nsim, weights=[]):
 
@@ -166,3 +251,15 @@ def trend_bs(df, nsim, weights=[]):
     trend_ub = np.percentile(trends_bs, 97.5, axis=0)
 
     return trend_mu, trend_lb, trend_ub
+
+
+
+
+
+
+# p1 = Point(-980000, -440000)
+# p2 = Point(-980000, -436300)
+# p3 = Point(-1000000, -436300)
+# p4 = Point(-1000000, -440000)
+# pointList = [p1, p2, p3, p4]
+# poly = Polygon([[p.x, p.y] for p in pointList])
