@@ -7,6 +7,7 @@ import geopandas as gpd
 from pathlib import Path
 import time
 from sklearn.neighbors import BallTree
+from scipy import signal
 import holoviews as hv
 hv.extension('bokeh')
 
@@ -222,12 +223,13 @@ def plot_Xover(
     return plt_ts1, plt_ts2
 
 def trend_bs(df, nsim, weights=[]):
-
-
-
+    """
+    Dpc string goes here.
+    """
     tic = time.perf_counter()
 
     trends_bs = pd.DataFrame(columns=df.columns)
+    intercepts = pd.DataFrame(columns=df.columns)
 
     if weights:
         weights.name = 'weights'
@@ -242,24 +244,37 @@ def trend_bs(df, nsim, weights=[]):
         trends_bs = trends_bs.append(
             pd.Series(coeffs[0], index=df.columns), 
             ignore_index=True)
+        intercepts = intercepts.append(
+            pd.Series(coeffs[1], index=df.columns), 
+            ignore_index=True)
 
     toc = time.perf_counter()
     print(f"Execution time of bootstrapping: {toc-tic} s")
 
     trend_mu = np.mean(trends_bs)
+    intercept_mu = np.mean(intercepts)
     trend_lb = np.percentile(trends_bs, 2.5, axis=0)
     trend_ub = np.percentile(trends_bs, 97.5, axis=0)
 
-    return trend_mu, trend_lb, trend_ub
+    return trend_mu, intercept_mu, trend_lb, trend_ub
+
+# Function to perform autocorrelation
+def acf(series):
+    data = signal.detrend(series)
+    n = len(data)
+    variance = data.var()
+    x = data-data.mean()
+    r = np.correlate(x, x, mode = 'same')
+    result = r/(variance*n)
+    return result
+
+# Function to perform spectral analysis
+def get_spectrum(df, coeff1, coeff0):
+    """
+    Doc string goes here.
+    """
+    # Detrend data (may need to use coeffs here for speed)
+    data = signal.detrend(df)
 
 
-
-
-
-
-# p1 = Point(-980000, -440000)
-# p2 = Point(-980000, -436300)
-# p3 = Point(-1000000, -436300)
-# p4 = Point(-1000000, -440000)
-# pointList = [p1, p2, p3, p4]
-# poly = Polygon([[p.x, p.y] for p in pointList])
+    
