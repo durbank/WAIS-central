@@ -1,0 +1,20 @@
+name: wais-central
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - geoviews
+  - jupyter
+  - geopandas
+  - statsmodels
+  - scikit-learn
+  - pylint
+  - descartes
+  - xlrd
+  - phantomjs
+  - pillow
+  - selenium
+  - firefox
+  - geckodriver
+prefix: /home/durbank/miniconda3/envs/wais-central
+
