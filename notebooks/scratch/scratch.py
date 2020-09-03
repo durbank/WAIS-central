@@ -77,8 +77,8 @@ accum_trace = gpd.GeoDataFrame(
 # Convert accum crs to same as Antarctic outline
 accum_trace = accum_trace.to_crs(ant_outline.crs)
 
-# Drop original index values
-accum_trace = accum_trace.drop('index', axis=1)
+# # Drop original index values
+# accum_trace = accum_trace.drop('index', axis=1)
 
 # %%
 # Calculate robust linear trends
@@ -93,13 +93,18 @@ accum_trace['t_lb'] = t_lb / accum_trace['accum']
 accum_trace['t_ub'] = t_ub / accum_trace['accum']
 
 # %%
+## ACF exploration
 
-tmp = pd.DataFrame(
-    {'accum': accum.mean(axis=0), 
-    'max_std': accum_std.max(axis=0)})
-print(
-    f"{((tmp.max_std/tmp.accum) > 1).sum() / len(tmp) *100:.2f}% have max errors intersecting zero")
+# 
+accum_acf = acf(accum)
 
+accum_acf.mean(axis=1).plot(color='blue', linewidth=2)
+(accum_acf.mean(axis=1) 
+    + accum_acf.std(axis=1)).plot(
+        color='blue', linestyle='--')
+(accum_acf.mean(axis=1) 
+    - accum_acf.std(axis=1)).plot(
+        color='blue', linestyle='--')
 
 # %%
 ## Plot data inset map
