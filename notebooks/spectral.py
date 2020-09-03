@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
+import matplotlib.pyplot as plt
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
@@ -94,21 +95,26 @@ for dir in data_list:
     data = import_PAIPR(dir)
     data_raw = data_raw.append(data)
 
-# Subset data into QC flags 0, 1, and 2
-data_0 = data_raw[data_raw['QC_flag'] == 0]
-data_1 = data_raw[data_raw['QC_flag'] == 1]
-# data_2 = data_raw[data_raw['QC_flag'] == 2]
+# Remove results for below QC data reliability
+data_0 = data_raw[
+    data_raw.Year > data_raw.QC_yr].sort_values(
+        ['collect_time', 'Year'])
 
-# Remove data_1 values earlier than assigned QC yr, 
-# and recombine results with main data results
-data_1 = data_1[data_1.Year >= data_1.QC_yr]
-data_0 = data_0.append(data_1).sort_values(
-    ['collect_time', 'Year'])
+# # Subset data into QC flags 0, 1, and 2
+# data_0 = data_raw[data_raw['QC_flag'] == 0]
+# data_1 = data_raw[data_raw['QC_flag'] == 1]
+# # data_2 = data_raw[data_raw['QC_flag'] == 2]
+
+# # Remove data_1 values earlier than assigned QC yr, 
+# # and recombine results with main data results
+# data_1 = data_1[data_1.Year >= data_1.QC_yr]
+# data_0 = data_0.append(data_1).sort_values(
+#     ['collect_time', 'Year'])
 
 #%%
 # Format accumulation data
 accum_long = format_PAIPR(
-    data_0, start_yr=1969, end_yr=2010).drop(
+    data_0, start_yr=1975, end_yr=2010).drop(
         'elev', axis=1)
 traces = accum_long.groupby('trace_ID')
 
@@ -145,7 +151,7 @@ accum_trace = accum_trace.drop('index', axis=1)
 core_accum = core_ALL.transpose()
 core_accum = core_accum[
     core_accum.index.isin(
-        np.arange(1901,2011))].iloc[::-1]
+        np.arange(1975,2010))].iloc[::-1]
 core_accum = core_accum.iloc[
     :,(core_accum.isna().sum() <= 0).to_list()]
 core_accum.columns.name = 'Core'
@@ -153,11 +159,26 @@ core_accum.columns.name = 'Core'
 # Extract core locations for remaing cores
 core_df_set = core_locs.loc[core_accum.columns]
 
+
+
+
+
+# %%
+## Autocorrelation analysis
+
+core_acf = acf(core_accum)
+core_acf.plot()
+
+
+
+
+
+
 # %%
 ## Orientation plot showing location of data
 
 radar_plt = gv.Points(
-    accum_trace.sample(2500), crs=ANT_proj).opts(
+    accum_trace.sample(1000), crs=ANT_proj).opts(
         projection=ANT_proj, color='red')
 core_plt = gv.Points(
     core_df_set, crs=ANT_proj, vdims=['Core']).opts(
@@ -211,19 +232,12 @@ plt_core.opts(
 # Plot of power spectral density for firn/ice cores.
 # Although the results are pretty varied, in general there seems to be more dominant periodicities near ~6 years, with additional peaks near 17 years and 2 years.
 # Talos Dome has the strongest periodic signal at ~4 years.
-#  
-#%%
-# Plot of strong periodicity core record
-core_accum['TD96 Talos Dome'].plot()
-
-#%% [markdown]
-# Plot of the strong-periodicity core in the preceding plot (for TD96 Talow Dome).
-# The dominant mode of periodicity is ~4 years.
-#  
+#   
 # %%
 ## Calculate power specta for accum time series (both radar results and cores)
 
 accum_tsa = accum.iloc[:,::40]
+# accum_tsa = accum
 
 # Detrend and normalize data
 accum_array = signal.detrend(accum_tsa)
@@ -287,6 +301,17 @@ noise_plt.opts(width=950, height=600, colorbar=True)
 # The synthetic time series were generated from the detrended radar time series means and standard deviations, and were then normalized using the same methods as for the radar results.
 # The major takeaway here is that the radar results express obvious patterns that I believe are beyond what we would expect from random noise.
 #  
+# %%
+ax = plt.subplot(111)
+plt.plot(
+    fs_core, Pxx_core.mean(axis=1), color='blue', 
+    label='Ice cores')
+plt.plot(
+    fs_accum, Pxx_accum.mean(axis=1), color='red', 
+    label='Radar traces')
+plt.xlabel('Freqency (cycles/yr)')
+plt.ylabel('Mean power density')
+plt.legend(loc='best')
 #%% [markdown]
 # ## Spatial plots of PSD results
 # 
@@ -380,7 +405,7 @@ plt_max = hv.Points(
     df_power, kdims=['Easting', 'Northing'], 
     vdims=[
         hv.Dimension(
-            'Max period', range=(0,20)), 
+            'Max period', range=(0,25)), 
         'Max power']).opts(
         color='Max period', size='Max power')
 plt_max.opts(
