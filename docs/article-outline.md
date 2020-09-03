@@ -55,6 +55,7 @@ Discuss frequency modes from spectral analysis:
 - Optimization of QC cutoff values
   - Not entirely sure the best way to do this
 - Incorporation of logistic regression parameters into the Monte Carlo simulations
+  - Likely need to increase MC simulations to at least 1,000
   - Also determine whether regression parameters have spatial component and model accordingly?
 - Improved surface assignment (right now performed using constant offset)
 

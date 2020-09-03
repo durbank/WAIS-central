@@ -1,4 +1,4 @@
-# This script currently is for developing time series analysis with accumulation results
+# This script currently is for investigating changes to PAIPR results after incorporating logistic parameters into MC simulations
 
 # %%
 # Import requisite modules
@@ -27,6 +27,7 @@ SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
 from my_functions import *
 
+# %%
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
 
@@ -36,38 +37,7 @@ ant_path = ROOT_DIR.joinpath(
 ant_outline = gpd.read_file(ant_path)
 
 # %%
-# Import SAMBA cores
-samba_raw = pd.read_excel(
-    DATA_DIR.joinpath("DGK_SMB_compilation.xlsx"), 
-    sheet_name='Accumulation')
-
-core_ALL = samba_raw.iloc[3:,1:]
-core_ALL.index = samba_raw.iloc[3:,0]
-core_ALL.index.name = 'Year'
-core_meta = samba_raw.iloc[0:3,1:]
-core_meta.index = ['Lat', 'Lon', 'Elev']
-core_meta.index.name = 'Attributes'
-new_row = core_ALL.notna().sum()
-new_row.name = 'Duration'
-core_meta = core_meta.append(new_row)
-
-
-core_ALL = core_ALL.transpose()
-core_meta = core_meta.transpose()
-core_meta.index.name = 'Name'
-# %%
-core_locs = gpd.GeoDataFrame(
-    data=core_meta.drop(['Lat', 'Lon'], axis=1), 
-    geometry=gpd.points_from_xy(
-        core_meta.Lon, core_meta.Lat), 
-    crs='EPSG:4326')
-core_locs = core_locs.to_crs('EPSG:3031')
-
-# %%
-data_list = [dir for dir in DATA_DIR.glob('gamma/*/')]
-print(f"Removed {data_list.pop(2)} from list")
-print(f"Removed {data_list.pop(-1)} from list")
-print(f"Removed {data_list.pop(2)} from list")
+data_list = [dir for dir in DATA_DIR.glob('Gauss/*/')]
 data_raw = pd.DataFrame()
 for dir in data_list:
     data = import_PAIPR(dir)
@@ -111,125 +81,77 @@ accum_trace = accum_trace.to_crs(ant_outline.crs)
 accum_trace = accum_trace.drop('index', axis=1)
 
 # %%
-# Subset core accum to same time period as radar
-core_accum = core_ALL.transpose()
-core_accum = core_accum[
-    core_accum.index.isin(
-        np.arange(1979,2011))].iloc[::-1]
-core_accum = core_accum.iloc[
-    :,(core_accum.isna().sum() <= 0).to_list()]
-core_accum.columns.name = 'Core'
+# Calculate robust linear trends
+trends, t_intercept, t_lb, t_ub = trend_bs(
+    accum, 1000)
 
-# Detrend and normalize data
-core_array = signal.detrend(core_accum)
-core_array = (
-    (core_array - core_array.mean(axis=0)) 
-    / core_array.std(axis=0))
+# Add trend results to traces gdf
+accum_trace['trend_abs'] = trends
+accum_trace['trend_perc'] = (trends 
+    / accum_trace['accum'])
+accum_trace['t_lb'] = t_lb / accum_trace['accum']
+accum_trace['t_ub'] = t_ub / accum_trace['accum']
 
-fs_core, Pxx_core = signal.welch(
-    core_array, axis=0, detrend=False)
-# Pxx = Pxx.astype('complex128').real
-
-core_results = pd.DataFrame(
-    Pxx_core, index=fs_core, 
-    columns=core_accum.columns)
-
-ds_core = hv.Dataset(
-    (np.arange(Pxx_core.shape[1]), 
-    fs_core, Pxx_core), 
-    ['Core', 'Frequency'], 'Power')
-
-plt_core = ds_core.to(
-    hv.Image, ['Core', 'Frequency'])
-# plt_core = ds_core.to(
-#     hv.Image, ['Core', 'Frequency']).hist()
-plt_core.opts(width=1200, height=800, colorbar=True)
 # %%
-## Calculate power specta for accum time series (both radar results and cores)
 
-accum_tsa = accum.iloc[:,::40]
-
-# Detrend and normalize data
-accum_array = signal.detrend(accum_tsa)
-accum_array = (
-    (accum_array - accum_array.mean(axis=0)) 
-    / accum_array.std(axis=0))
-
-fs_accum, Pxx_accum = signal.welch(
-    accum_array, axis=0, detrend=False)
-
-accum_results = pd.DataFrame(
-    Pxx_accum, index=fs_accum, 
-    columns=accum_tsa.columns)
+tmp = pd.DataFrame(
+    {'accum': accum.mean(axis=0), 
+    'max_std': accum_std.max(axis=0)})
+print(
+    f"{((tmp.max_std/tmp.accum) > 1).sum() / len(tmp) *100:.2f}% have max errors intersecting zero")
 
 
-ds_accum = hv.Dataset(
-    (np.arange(Pxx_accum.shape[1]), 
-    fs_accum, Pxx_accum), 
-    ['Trace_ID', 'Frequency'], 'Power')
-
-plt_accum = ds_accum.to(
-    hv.Image, ['Trace_ID', 'Frequency'])
-plt_accum.opts(width=1200, height=800, colorbar=True)
 # %%
-# Compare results to white noise with the same mean and std of the detrended accum time series
-ts_data = signal.detrend(accum.iloc[:,::40], axis=0)
-df_test = np.random.normal(
-    ts_data.mean(axis=0), ts_data.std(axis=0), 
-    ts_data.shape)
-
-df_norm = (
-    (df_test - df_test.mean(axis=0)) 
-    / df_test.std(axis=0))
-
-fs_noise, Pxx_noise = signal.welch(df_norm, axis=0)
-
-noise_results = pd.DataFrame(
-    Pxx_noise, index=fs_noise, 
-    columns=accum.iloc[:,::40].columns)
-
-ds_noise = hv.Dataset(
-    (np.arange(Pxx_noise.shape[1]), 
-    fs_noise, Pxx_noise), 
-    ['Trace_ID', 'Frequency'], 'Power')
-
-noise_plt = ds_noise.to(
-    hv.Image, ['Trace_ID', 'Frequency']).hist()
-noise_plt
+## Plot data inset map
+Ant_bnds = gv.Shape.from_shapefile(
+    ant_path, crs=ANT_proj).opts(
+    projection=ANT_proj, width=500, height=500)
+trace_plt = gv.Points(accum_trace, crs=ANT_proj).opts(
+    projection=ANT_proj, color='red')
+Ant_bnds * trace_plt
 # %%
-# 3D plot of time series analysis
-import plotly.express as px
-loc_tmp = core_locs.loc[core_accum.columns]
-E_core = loc_tmp.geometry.x
-N_core = loc_tmp.geometry.y
-df_core = pd.DataFrame(
-    {'Easting': E_core.repeat(Pxx_core.shape[0]), 
-    'Northing': N_core.repeat(Pxx_core.shape[0]), 
-    'Frequency': np.tile(fs_core, E_core.shape[0]), 
-    'Power': Pxx_core.reshape(
-        Pxx_core.size, 1).squeeze()})
-fig = px.scatter_3d(
-    df_core, 
-    x='Easting', y='Northing', z='Frequency', 
-    color='Power', color_continuous_scale='viridis')
-fig.show()
 
-#%%
-loc_tmp = accum_trace.loc[accum_tsa.columns]
-E_accum = loc_tmp.geometry.x
-N_accum = loc_tmp.geometry.y
-df_accum = pd.DataFrame(
-    {'Easting': E_accum.repeat(Pxx_accum.shape[0]), 
-    'Northing': N_accum.repeat(Pxx_accum.shape[0]), 
-    'Frequency': np.tile(fs_accum, E_accum.shape[0]), 
-    'Power': Pxx_accum.reshape(
-        Pxx_accum.size, 1).squeeze()})
+accum_plt = gv.Points(
+    accum_trace, 
+    vdims=['accum', 'std'], 
+    crs=ANT_proj).opts(projection=ANT_proj, color='accum', 
+    cmap='viridis', colorbar=True, 
+    tools=['hover'], width=600, height=400)
+accum_plt
 
-fig = px.scatter_3d(
-    df_accum, 
-    x='Easting', y='Northing', z='Frequency', 
-    color='Power', color_continuous_scale='viridis', 
-    opacity=0.75)
+# %%
+
+trend_plt = gv.Points(
+    accum_trace, 
+    vdims=['trend_perc', 't_lb', 't_ub'], 
+    crs=ANT_proj). opts(
+        projection=ANT_proj, color='trend_perc', 
+        cmap='coolwarm', symmetric=True, colorbar=True, 
+        tools=['hover'], width=600, height=400)
+trend_plt
+
+# %%
+Tabs_plt = gv.Points(
+    accum_trace, 
+    vdims=['trend_abs'], 
+    crs=ANT_proj). opts(
+        projection=ANT_proj, color='trend_abs', 
+        cmap='coolwarm', symmetric=False, colorbar=True, 
+        tools=['hover'], width=600, height=400)
+Tabs_plt
+
+# %%
+## Plot random accumulation time series
+import matplotlib.pyplot as plt
+
+i = np.random.randint(accum.shape[1])
+yr = accum.index
+smb = accum.iloc[:,i]
+smb_err = accum_std.iloc[:,i]
+fig, ax = plt.subplots()
+ax.plot(yr, smb, color='red', lw=2)
+ax.plot(yr, smb+smb_err, color='red', ls='--')
+ax.plot(yr, smb-smb_err, color='red', ls='--')
 fig.show()
 
 # %%
