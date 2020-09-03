@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 from sklearn.neighbors import BallTree
 from scipy import signal
+import statsmodels.tsa.stattools as tsa
 import holoviews as hv
 hv.extension('bokeh')
 
@@ -51,24 +52,37 @@ def format_PAIPR(data_raw, start_yr, end_yr):
     # # (if not, take the mean of all time series)
     # data = data.groupby(['trace_ID', 'Year']).mean()
 
-    # Generate descriptive statistics based on imported 
-    # gamma-fitted parameters
-    alpha = data['gamma_shape']
-    alpha.loc[alpha<1] = 1
-    beta = 1/data['gamma_scale']
-    mode_accum = (alpha-1)/beta
-    var_accum = alpha/beta**2
-
-    # New df (in long format) with accum data assigned
-    data_long = (
-        data.filter(['trace_ID', 'collect_time', 
-        'QC_flag', 'Lat', 'Lon', 
-        'elev', 'Year']).assign(
-            accum=mode_accum, std=np.sqrt(var_accum))
-        .reset_index()
-    )
+    if 'gamma_shape' in data.columns:
+        # Generate descriptive statistics based on 
+        # imported gamma-fitted parameters
+        alpha = data['gamma_shape']
+        alpha.loc[alpha<1] = 1
+        beta = 1/data['gamma_scale']
+        mode_accum = (alpha-1)/beta
+        var_accum = alpha/beta**2
+        
+        # New df (in long format) with accum data assigned
+        data_long = (
+            data.filter(['trace_ID', 'collect_time', 
+            'QC_flag', 'Lat', 'Lon', 
+            'elev', 'Year']).assign(
+                accum=mode_accum, 
+                std=np.sqrt(var_accum))
+            .reset_index())
+    else:
+        # New df (in long format) with accum data assigned
+        data_long = (
+            data.filter(['trace_ID', 'collect_time', 
+            'QC_flag', 'Lat', 'Lon', 
+            'elev', 'Year']).assign(
+                accum=data['accum_mu'], 
+                std=data['accum_std']).reset_index())
+    
     data_long['collect_time'] = pd.to_datetime(
         data_long['collect_time'])
+
+    # Additional subroutine to remove time series where the deepest 3 years have overly large uncertainties (>75% of expected value?)
+
     return data_long
 
 def get_nearest(
@@ -222,7 +236,7 @@ def plot_Xover(
     
     return plt_ts1, plt_ts2
 
-def trend_bs(df, nsim, weights=[]):
+def trend_bs(df, nsim, df_err=pd.DataFrame()):
     """
     Dpc string goes here.
     """
@@ -231,16 +245,19 @@ def trend_bs(df, nsim, weights=[]):
     trends_bs = pd.DataFrame(columns=df.columns)
     intercepts = pd.DataFrame(columns=df.columns)
 
-    if weights:
-        weights.name = 'weights'
+    if df_err.empty:
+        df_err = pd.DataFrame(
+            np.ones(df.shape), index=df.index, 
+            columns=df.columns)
 
     for _ in range(nsim):
         data_bs = df.sample(
         len(df), replace=True).sort_index()
-        # weights_bs = weights[accum_bs.index]
-        # coeffs = np.polyfit(
-        #     accum_bs.index, accum_bs, 1, w=1/weights_bs)
-        coeffs = np.polyfit(data_bs.index, data_bs, 1)
+        weights_bs = (
+            1/df_err.loc[data_bs.index]).mean(axis=1)
+        coeffs = np.polyfit(
+            data_bs.index, data_bs, 1, w=weights_bs)
+
         trends_bs = trends_bs.append(
             pd.Series(coeffs[0], index=df.columns), 
             ignore_index=True)
@@ -259,22 +276,26 @@ def trend_bs(df, nsim, weights=[]):
     return trend_mu, intercept_mu, trend_lb, trend_ub
 
 # Function to perform autocorrelation
-def acf(series):
-    data = signal.detrend(series)
-    n = len(data)
-    variance = data.var()
-    x = data-data.mean()
-    r = np.correlate(x, x, mode = 'same')
-    result = r/(variance*n)
-    return result
-
-# Function to perform spectral analysis
-def get_spectrum(df, coeff1, coeff0):
+def acf(df):
     """
     Doc string goes here.
     """
-    # Detrend data (may need to use coeffs here for speed)
-    data = signal.detrend(df)
+    # Detrend time series data
+    arr_ts = signal.detrend(df, axis=0)
+
+    lags = int(np.round(arr_ts.shape[0]/2))
+    arr_acf = np.zeros((lags, arr_ts.shape[1]))
+    for idx, col in enumerate(arr_ts.T):
+        arr_acf[:,idx] = tsa.acf(col, nlags=lags-1)
+    acf_df = pd.DataFrame(
+        arr_acf, columns=df.columns, 
+        index=np.arange(lags))
+    acf_df.index.name = 'Lag'
+
+    return acf_df
+
+
+
 
 
     
