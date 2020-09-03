@@ -68,7 +68,7 @@ def format_PAIPR(data_raw, start_yr, end_yr):
             'elev', 'Year']).assign(
                 accum=mode_accum, 
                 std=np.sqrt(var_accum))
-            .reset_index())
+            .reset_index(drop=True))
     else:
         # New df (in long format) with accum data assigned
         data_long = (
@@ -76,12 +76,20 @@ def format_PAIPR(data_raw, start_yr, end_yr):
             'QC_flag', 'Lat', 'Lon', 
             'elev', 'Year']).assign(
                 accum=data['accum_mu'], 
-                std=data['accum_std']).reset_index())
+                std=data['accum_std']).reset_index(drop=True))
     
     data_long['collect_time'] = pd.to_datetime(
         data_long['collect_time'])
 
-    # Additional subroutine to remove time series where the deepest 3 years have overly large uncertainties (>75% of expected value?)
+    # Additional subroutine to remove time series where the deepest 3 years have overly large uncertainties (std>67% of expected value)
+    data_tmp = data_long[data_long['Year'] <= (start_yr+2)]
+    data_log = pd.DataFrame(
+        {'trace_ID': data_tmp['trace_ID'], 
+        'ERR_log': data_tmp['std'] > 0.67*data_tmp['accum']})
+    trace_tmp = data_log.groupby('trace_ID')
+    IDs_keep = trace_tmp.filter(
+        lambda x: not all(x['ERR_log']))['trace_ID'].unique()
+    data_long = data_long[data_long['trace_ID'].isin(IDs_keep)]
 
     return data_long
 
