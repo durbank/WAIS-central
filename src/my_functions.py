@@ -68,7 +68,7 @@ def format_PAIPR(data_raw, start_yr, end_yr):
             'elev', 'Year']).assign(
                 accum=mode_accum, 
                 std=np.sqrt(var_accum))
-            .reset_index(drop=True))
+            .reset_index(drop=False))
     else:
         # New df (in long format) with accum data assigned
         data_long = (
@@ -92,6 +92,32 @@ def format_PAIPR(data_raw, start_yr, end_yr):
     data_long = data_long[data_long['trace_ID'].isin(IDs_keep)]
 
     return data_long
+
+def long2gdf(accum_long):
+    """
+    Function to convert data in long format to geodataframe aggregated
+    by trace location and sorted by collection time
+    """
+
+    accum_long['collect_time'] = (
+        accum_long.collect_time.values.astype(np.int64))
+    traces = accum_long.groupby('trace_ID').mean().drop(
+        'Year', axis=1)
+    traces['collect_time'] = (
+        pd.to_datetime(traces.collect_time)
+        .dt.round('1ms'))
+
+    # Sort by collect_time and reset trace_ID index
+    traces = (traces.sort_values('collect_time')
+        .reset_index(drop=True))
+    traces.index.name = 'trace_ID'
+
+    traces_gdf = gpd.GeoDataFrame(
+        traces, geometry=gpd.points_from_xy(
+            traces.Lon, traces.Lat), 
+        crs="EPSG:4326").drop(['Lat', 'Lon'], axis=1)
+
+    return traces_gdf
 
 def get_nearest(
     src_points, candidates, k_neighbors=1):
@@ -130,6 +156,12 @@ def nearest_neighbor(left_gdf, right_gdf, return_dist=False, planet_radius=63710
     NOTICE: Assumes that the input Points are in WGS84 projection (lat/lon).
     """
 
+    end_crs = left_gdf.crs
+
+    # Ensures data are in WGS84 projection
+    left_gdf = left_gdf.to_crs('EPSG:4326')
+    right_gdf = right_gdf.to_crs('EPSG:4326')
+
     left_geom_col = left_gdf.geometry.name
     right_geom_col = right_gdf.geometry.name
 
@@ -163,6 +195,9 @@ def nearest_neighbor(left_gdf, right_gdf, return_dist=False, planet_radius=63710
     if return_dist:
         # Convert to meters from radians
         closest_points['distance'] = dist * planet_radius
+
+    # Reproject results back to original projection
+    closest_points = closest_points.to_crs(end_crs)
 
     return closest_points
 

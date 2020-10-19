@@ -8,6 +8,7 @@ Here I will discuss the motivation and background of the project.
 Some of the primary motivations include:
 
 - SMB varies greatly across the ice sheet, but constrained by few *in-situ* data points
+- Current results from cores show variability/dipole in trends, need more data to better explore this
 - Radar is a valulabe tool, but requires automated methods to best use large datasets
 - Such methods require careful vetting to ensure consistency of results prior to use in interpretations
 
@@ -49,6 +50,16 @@ Discuss frequency modes from spectral analysis:
 - Highlight any regions of differing but spatially coherent modes
 - How well do these results line up with the limited core data?
 - Should we show how well the results compare with reanalysis?
+
+### Discussion
+
+Important to discuss limitations in the methods, and what other explanations exist for the observed patterns
+
+- Could be an artefact of the processing methods (e.g. incorrect density model could induce artifical trends, systemic issues in layer picking either at depth or near-surface could bias results, larger accum uncertainties at earlier years [when bounded at 0] could artifically inflate mean accum for those years and induce an incorrect negative trend)
+- Need to have solutions for each of these, or further discussion of how likely they are (hopefully we can demonstate low risk)
+- Density model biases could be investigated with repeat flightlines?
+- Systemic issues in layer picking can be investigated with more manual layer tracing (esp. of repeat flightlines) to determine if potential issues are with methods or radar echograms more generally
+- Uncertainty-induced biases can be mitigated by limiting results to those with limited "balloning" of uncertainties with depth and eliminating time series with accum distributions that approach/include 0 (in limited testing, I found this only eliminates ~10% of results)
 
 ## TODO
 
