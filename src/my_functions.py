@@ -39,7 +39,10 @@ def format_PAIPR(data_raw, start_yr, end_yr):
     """
     # Remove time series with data missing from period
     # of interest (and clip to period of interest)
-    traces = data_raw.groupby(['Lat', 'Lon', 'elev'])
+    traces = data_raw.groupby(
+        ['collect_time', 'Lat', 'Lon'])
+    # traces = data_raw.groupby(
+    #     ['Lat', 'Lon', 'elev'])
     data = data_raw.assign(trace_ID = traces.ngroup())
     traces = data.groupby('trace_ID')
     data = traces.filter(
@@ -89,9 +92,17 @@ def format_PAIPR(data_raw, start_yr, end_yr):
     trace_tmp = data_log.groupby('trace_ID')
     IDs_keep = trace_tmp.filter(
         lambda x: not all(x['ERR_log']))['trace_ID'].unique()
-    data_long = data_long[data_long['trace_ID'].isin(IDs_keep)]
+    data_long = (
+        data_long[data_long['trace_ID']
+        .isin(IDs_keep)])
 
-    return data_long
+    # Reset trace IDs to match total number of traces
+    tmp_group = data_long.groupby('trace_ID')
+    data_long['trace_ID'] = tmp_group.ngroup()
+    data_final = data_long.sort_values(
+        ['trace_ID', 'Year']).reset_index(drop=True)
+
+    return data_final
 
 def long2gdf(accum_long):
     """
