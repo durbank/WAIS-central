@@ -29,6 +29,8 @@ def import_PAIPR(input_dir):
     for file in input_dir.glob("*.csv"):
         data_f = pd.read_csv(file)
         data = data.append(data_f)
+    data['collect_time'] = pd.to_datetime(
+        data['collect_time'])
     return data
 
 
@@ -80,21 +82,20 @@ def format_PAIPR(data_raw, start_yr, end_yr):
             'elev', 'Year']).assign(
                 accum=data['accum_mu'], 
                 std=data['accum_std']).reset_index(drop=True))
-    
-    data_long['collect_time'] = pd.to_datetime(
-        data_long['collect_time'])
 
     # Additional subroutine to remove time series where the deepest 3 years have overly large uncertainties (std>67% of expected value)
     data_tmp = data_long[data_long['Year'] <= (start_yr+2)]
     data_log = pd.DataFrame(
         {'trace_ID': data_tmp['trace_ID'], 
-        'ERR_log': data_tmp['std'] > 0.67*data_tmp['accum']})
+        'ERR_log': 2*data_tmp['std'] > data_tmp['accum']})
     trace_tmp = data_log.groupby('trace_ID')
     IDs_keep = trace_tmp.filter(
         lambda x: not all(x['ERR_log']))['trace_ID'].unique()
-    data_long = (
-        data_long[data_long['trace_ID']
-        .isin(IDs_keep)])
+    # data_tmp = data_long.groupby(
+    #     'trace_ID').mean().query('2*std < accum').reset_index()
+    # IDs_keep = data_tmp['trace_ID']
+    data_long = data_long[
+        data_long['trace_ID'].isin(IDs_keep)]
 
     # Reset trace IDs to match total number of traces
     tmp_group = data_long.groupby('trace_ID')
