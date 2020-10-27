@@ -28,10 +28,12 @@ sys.path.append(str(SRC_DIR))
 from my_functions import *
 
 # Define plotting projection to use
-ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
+ANT_proj = ccrs.SouthPolarStereo(
+    true_scale_latitude=-71)
 
 # Define Antarctic boundary file
-shp = str(ROOT_DIR.joinpath('data/Ant_basemap/Coastline_medium_res_polygon.shp'))
+shp = str(ROOT_DIR.joinpath(
+    'data/Ant_basemap/Coastline_medium_res_polygon.shp'))
 
 ## Import and format PAIPR-generated results
 
@@ -82,7 +84,8 @@ gdf_traces.to_crs(epsg=3031, inplace=True)
 
 trends, _, lb, ub = trend_bs(
     accum_ALL, 1000, df_err=std_ALL)
-gdf_traces['trend'] = trends.values / gdf_traces['accum']
+gdf_traces['trend'] = (
+    trends.values / gdf_traces['accum'])
 gdf_traces['t_lb'] = lb / gdf_traces['accum']
 gdf_traces['t_ub'] = ub / gdf_traces['accum']
 gdf_traces['t_abs'] = trends.values
@@ -90,7 +93,8 @@ gdf_traces['t_abs'] = trends.values
 
 ## Add factor for trend signficance
 
-# insig_idx = gdf_traces.query('t_lb<0 & t_ub>0').index.values
+# insig_idx = gdf_traces.query(
+#     't_lb<0 & t_ub>0').index.values
 sig_idx = np.invert(np.array(
     [(gdf_traces['t_lb'] < 0).values, 
     (gdf_traces['t_ub'] > 0).values]).all(axis=0))
@@ -98,34 +102,43 @@ sig_idx = np.invert(np.array(
 
 ## Plot data inset map
 
-Ant_bnds = gv.Shape.from_shapefile(shp, crs=ANT_proj).opts(
-    projection=ANT_proj, width=500, height=500)
-trace_plt = gv.Points(gdf_traces, crs=ANT_proj).opts(
-    projection=ANT_proj, color='red')
+Ant_bnds = gv.Shape.from_shapefile(
+    shp, crs=ANT_proj).opts(
+        projection=ANT_proj, width=500, height=500)
+trace_plt = gv.Points(
+    gdf_traces, crs=ANT_proj).opts(
+        projection=ANT_proj, color='red')
 Ant_bnds * trace_plt
 
 
 ## Plot of mean accumulation
 
 accum_plt = gv.Points(
-    gdf_traces, vdims=['accum', 'std'], crs=ANT_proj).opts(
+    gdf_traces, vdims=['accum', 'std'], 
+    crs=ANT_proj).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, tools=['hover'])
+        cmap='viridis', colorbar=True, 
+        tools=['hover'])
 accum_plt.opts(width=600, height=400)
 
 
 ## Plot linear trend results
 
 trend_plt = gv.Points(
-    gdf_traces, vdims=['trend', 't_lb', 't_ub'], crs=ANT_proj).opts(
-        projection=ANT_proj, color='trend', cmap='coolwarm', 
-        symmetric=True, colorbar=True, tools=['hover'])
-sig_plt = gv.Points(
-    gdf_traces[sig_idx], vdims=['trend', 't_lb', 't_ub'], 
+    gdf_traces, vdims=['trend', 't_lb', 't_ub'], 
     crs=ANT_proj).opts(
-        projection=ANT_proj, color='trend', cmap='coolwarm', 
-        symmetric=True, colorbar=True, tools=['hover'])
-trend_plt.opts(width=600, height=400)+sig_plt.opts(width=600, height=400)
+        projection=ANT_proj, color='trend', 
+        cmap='coolwarm', symmetric=True, 
+        colorbar=True, tools=['hover'])
+sig_plt = gv.Points(
+    gdf_traces[sig_idx], 
+    vdims=['trend', 't_lb', 't_ub'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='trend', 
+        cmap='coolwarm', symmetric=True, 
+        colorbar=True, tools=['hover'])
+(trend_plt.opts(width=600, height=400)
+    + sig_plt.opts(width=600, height=400))
 
 
 ## Random time series plots
@@ -138,3 +151,11 @@ t_err = std_ALL.iloc[:,idx_i]
 t_series.plot(color='red', linewidth=2)
 (t_series+2*t_err).plot(color='red', linestyle='--')
 (t_series-2*t_err).plot(color='red', linestyle='--')
+
+## Code to aggregate results based on grids
+
+# Useful websites for doing this...
+# https://james-brennan.github.io/posts/fast_gridding_geopandas/
+# https://matthewrocklin.com/blog/work/2017/09/21/accelerating-geopandas-1
+# http://xarray.pydata.org/en/stable/pandas.html
+# http://xarray.pydata.org/en/stable/generated/xarray.Dataset.from_dataframe.html
