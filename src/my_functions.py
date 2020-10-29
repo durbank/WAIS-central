@@ -35,32 +35,33 @@ def import_PAIPR(input_dir):
 
 
 # Function to format imported PAIPR data
-def format_PAIPR(data_raw, start_yr, end_yr):
+def format_PAIPR(data_df, start_yr=None, end_yr=None):
     """
 
     """
-    # Remove time series with data missing from period
-    # of interest (and clip to period of interest)
-    traces = data_raw.groupby(
+    # Create groups based on trace locations
+    traces = data_df.groupby(
         ['collect_time', 'Lat', 'Lon'])
-    # traces = data_raw.groupby(
-    #     ['Lat', 'Lon', 'elev'])
-    data = data_raw.assign(trace_ID = traces.ngroup())
-    traces = data.groupby('trace_ID')
-    data = traces.filter(
-        lambda x: min(x['Year']) <= start_yr 
-        and max(x['Year']) >= end_yr)
-    data = data.query(
-        f"Year >= {start_yr} & Year <= {end_yr}")
+    data_df = data_df.assign(trace_ID = traces.ngroup())
+    traces = data_df.groupby('trace_ID')
+
+    if start_yr != end_yr:
+        # Remove time series with data missing from period
+        # of interest (and clip to period of interest)
+        data_df = traces.filter(
+            lambda x: min(x['Year']) <= start_yr 
+            and max(x['Year']) >= end_yr)
+        data_df = data_df.query(
+            f"Year >= {start_yr} & Year <= {end_yr}")
 
     # # Ensure each trace has only one time series 
     # # (if not, take the mean of all time series)
     # data = data.groupby(['trace_ID', 'Year']).mean()
 
-    if 'gamma_shape' in data.columns:
+    if 'gamma_shape' in data_df.columns:
         # Generate descriptive statistics based on 
         # imported gamma-fitted parameters
-        alpha = data['gamma_shape']
+        alpha = data_df['gamma_shape']
         alpha.loc[alpha<1] = 1
         beta = 1/data['gamma_scale']
         mode_accum = (alpha-1)/beta
@@ -68,7 +69,7 @@ def format_PAIPR(data_raw, start_yr, end_yr):
         
         # New df (in long format) with accum data assigned
         data_long = (
-            data.filter(['trace_ID', 'collect_time', 
+            data_df.filter(['trace_ID', 'collect_time', 
             'QC_flag', 'Lat', 'Lon', 
             'elev', 'Year']).assign(
                 accum=mode_accum, 
@@ -77,25 +78,33 @@ def format_PAIPR(data_raw, start_yr, end_yr):
     else:
         # New df (in long format) with accum data assigned
         data_long = (
-            data.filter(['trace_ID', 'collect_time', 
+            data_df.filter(['trace_ID', 'collect_time', 
             'QC_flag', 'Lat', 'Lon', 
             'elev', 'Year']).assign(
-                accum=data['accum_mu'], 
-                std=data['accum_std']).reset_index(drop=True))
+                accum=data_df['accum_mu'], 
+                std=data_df['accum_std']).reset_index(drop=True))
 
-    # Additional subroutine to remove time series where the deepest 3 years have overly large uncertainties (std>67% of expected value)
-    data_tmp = data_long[data_long['Year'] <= (start_yr+2)]
-    data_log = pd.DataFrame(
-        {'trace_ID': data_tmp['trace_ID'], 
-        'ERR_log': 2*data_tmp['std'] > data_tmp['accum']})
-    trace_tmp = data_log.groupby('trace_ID')
-    IDs_keep = trace_tmp.filter(
-        lambda x: not all(x['ERR_log']))['trace_ID'].unique()
-    # data_tmp = data_long.groupby(
-    #     'trace_ID').mean().query('2*std < accum').reset_index()
-    # IDs_keep = data_tmp['trace_ID']
+    # Additional subroutine to remove time series where the deepest 
+    # 3 years have overly large uncertainties (2*std > expected value)
+    # data_tmp = data_long[data_long['Year'] <= (start_yr+2)]
+    # data_log = pd.DataFrame(
+    #     {'trace_ID': data_tmp['trace_ID'], 
+    #     'ERR_log': 2*data_tmp['std'] > data_tmp['accum']})
+    # trace_tmp = data_log.groupby('trace_ID')
+    # IDs_keep = trace_tmp.filter(
+    #     lambda x: not all(x['ERR_log']))['trace_ID'].unique()
+    data_tmp = data_long.groupby(
+        'trace_ID').mean().query('2*std < accum').reset_index()
+    IDs_keep = data_tmp['trace_ID']
     data_long = data_long[
         data_long['trace_ID'].isin(IDs_keep)]
+
+    # Remove time series with fewer than 5 years
+    data_tmp = data_long.join(
+        data_long.groupby('trace_ID')['Year'].count(), 
+        on='trace_ID', rsuffix='_count')
+    data_long = data_tmp.query('Year_count >= 5').drop(
+        'Year_count', axis=1)
 
     # Reset trace IDs to match total number of traces
     tmp_group = data_long.groupby('trace_ID')
@@ -120,16 +129,18 @@ def long2gdf(accum_long):
         .dt.round('1ms'))
 
     # Sort by collect_time and reset trace_ID index
-    traces = (traces.sort_values('collect_time')
-        .reset_index(drop=True))
-    traces.index.name = 'trace_ID'
+    # traces = (traces.sort_values('collect_time')
+    #     .reset_index(drop=True))
+    # traces.index.name = 'trace_ID'
+    traces = traces.reset_index()
 
-    traces_gdf = gpd.GeoDataFrame(
-        traces, geometry=gpd.points_from_xy(
+    gdf_traces = gpd.GeoDataFrame(
+        traces.drop(['Lat', 'Lon'], axis=1), 
+        geometry=gpd.points_from_xy(
             traces.Lon, traces.Lat), 
-        crs="EPSG:4326").drop(['Lat', 'Lon'], axis=1)
+        crs="EPSG:4326")
 
-    return traces_gdf
+    return gdf_traces
 
 def get_nearest(
     src_points, candidates, k_neighbors=1):

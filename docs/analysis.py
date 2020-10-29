@@ -50,9 +50,11 @@ data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
 
-data_form = format_PAIPR(
-    data_0, start_yr=1990, end_yr=2009).drop(
+data_form = format_PAIPR(data_0).drop(
     'elev', axis=1)
+# data_form = format_PAIPR(
+#     data_0, start_yr=1990, end_yr=2009).drop(
+#     'elev', axis=1)
 
 # Create time series arrays for annual accumulation 
 # and error
@@ -61,23 +63,22 @@ accum_ALL = data_form.pivot(
 std_ALL = data_form.pivot(
     index='Year', columns='trace_ID', values='std')
 
-# Create gdf of mean results for each trace
-data_form['collect_time'] = (
-    data_form.collect_time.values.astype(np.int64))
-traces = data_form.groupby('trace_ID').mean().drop(
-    ['Year', 'QC_flag'], axis=1)
-traces['collect_time'] = pd.to_datetime(
-    traces.collect_time).dt.round('1ms')
-# traces = traces.sort_values(
-#     'collect_time').reset_index(drop=True)
-# traces.index.name = 'trace_ID'
-traces = traces.reset_index()
-gdf_traces = gpd.GeoDataFrame(
-    traces.drop(['Lat', 'Lon'], axis=1), 
-    geometry=gpd.points_from_xy(
-        traces.Lon, traces.Lat), 
-    crs="EPSG:4326")
+# Create gdf of mean results for each trace and 
+# transform to Antarctic Polar Stereographic
+gdf_traces = long2gdf(data_form)
 gdf_traces.to_crs(epsg=3031, inplace=True)
+
+
+
+
+def pt2grid(geo_df):
+    """
+    Description.
+    """
+
+
+
+
 
 
 ## Perform trend analysis
@@ -113,8 +114,15 @@ Ant_bnds * trace_plt
 
 ## Plot of mean accumulation
 
+# Get 1/99 range of mean accum
+c_min = np.floor(np.quantile(gdf_traces['accum'], 0.01))
+c_max = np.ceil(np.quantile(gdf_traces['accum'], 0.99))
+
 accum_plt = gv.Points(
-    gdf_traces, vdims=['accum', 'std'], 
+    gdf_traces, 
+    vdims=[
+        hv.Dimension('accum', range=(c_min, c_max)), 
+        'std', 'trace_ID'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='accum', 
         cmap='viridis', colorbar=True, 
@@ -159,3 +167,6 @@ t_series.plot(color='red', linewidth=2)
 # https://matthewrocklin.com/blog/work/2017/09/21/accelerating-geopandas-1
 # http://xarray.pydata.org/en/stable/pandas.html
 # http://xarray.pydata.org/en/stable/generated/xarray.Dataset.from_dataframe.html
+
+
+
