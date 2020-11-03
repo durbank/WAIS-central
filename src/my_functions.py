@@ -63,7 +63,7 @@ def format_PAIPR(data_df, start_yr=None, end_yr=None):
         # imported gamma-fitted parameters
         alpha = data_df['gamma_shape']
         alpha.loc[alpha<1] = 1
-        beta = 1/data['gamma_scale']
+        beta = 1/data_df['gamma_scale']
         mode_accum = (alpha-1)/beta
         var_accum = alpha/beta**2
         
@@ -141,6 +141,109 @@ def long2gdf(accum_long):
         crs="EPSG:4326")
 
     return gdf_traces
+
+def pts2grid(geo_df, resolution=5000):
+    import shapely
+    """
+    Description.
+    """
+    xmin, ymin, xmax, ymax = geo_df.total_bounds
+
+    x_pts = np.arange(
+        np.floor(xmin), np.ceil(xmax)+resolution, 
+        step=resolution)
+    y_pts = np.arange(
+        np.floor(ymin), np.ceil(ymax)+resolution, 
+        step=resolution)
+
+    grid_cells = []
+    for x in x_pts:
+        for y in y_pts:
+            x0 = x - resolution
+            y0 = y - resolution
+            grid_cells.append(shapely.geometry.box(x0, y0, x, y))
+    
+    geo_cells = gpd.GeoDataFrame(
+        data=grid_cells, columns=['geometry'],
+        crs=geo_df.crs)
+    # # Diagnostic plot
+    # ax = geo_cells.plot(facecolor='none', edgecolor='grey')
+    # geo_df.plot(ax=ax, column='accum', cmap='viridis', vmax=600)
+
+    geo_sjoin = gpd.sjoin(
+        geo_df, geo_cells, how='inner', op='within')
+    gdf_grid = gpd.GeoDataFrame(
+        data=geo_sjoin[['trace_ID', 'accum', 'std', 'index_right']], 
+        geometry=geo_cells.geometry[geo_sjoin['index_right']].values, 
+        crs=geo_df.crs)
+    
+    return gdf_grid
+
+
+def trace_combine(gdf_grid, accum_ALL, std_ALL):
+    """
+    Description.
+    """
+    # Get indices of grids that are populated
+    grid_pop = np.unique(gdf_grid['index_right'])
+
+    # Preallocate return arrays
+    accum_df = pd.DataFrame(
+        columns=np.arange(len(grid_pop)), 
+        index=accum_ALL.index)
+    std_df = pd.DataFrame(
+        columns=np.arange(len(grid_pop)), 
+        index=accum_ALL.index)
+    yr_count = pd.DataFrame(
+        columns=np.arange(len(grid_pop)), 
+        index=accum_ALL.index)
+    grid_final = gpd.GeoDataFrame(
+        columns=[
+            'grid_ID', 'trace_count', 'accum', 
+            'std', 'geometry'], 
+        index=np.arange(len(grid_pop)), crs=gdf_grid.crs)
+    
+
+    for i, grid_idx in enumerate(grid_pop):
+
+        # Subset geodf to traces in current grid and get trace_IDs
+        gdf_tmp = gdf_grid[gdf_grid['index_right']==grid_idx]
+        t_IDs = gdf_tmp['trace_ID'].values
+
+        # Get subsetted accum and std arrays
+        accum_arr = accum_ALL.iloc[:,t_IDs]
+        std_arr = std_ALL.iloc[:,t_IDs]
+
+        # Calculate weighted mean accum and std
+        weights = (1/std_arr) / np.tile(
+            (1/std_arr).sum(axis=1).to_numpy(), 
+            (std_arr.shape[1],1)). transpose()
+        accum_w = (accum_arr*weights).sum(axis=1)
+        std_w = np.sqrt(((std_arr**2)*weights).sum(axis=1))
+
+        # Set missing data to NaN
+        nan_idx = np.invert(weights.sum(axis=1).astype('bool'))
+        accum_w[nan_idx] = np.nan
+        std_w[nan_idx] = np.nan
+
+        # Add weighted mean and std to return arrays
+        accum_df.iloc[:,i] = accum_w
+        std_df.iloc[:,i] = std_w
+
+        # Get counts for number of records in annual 
+        # estimates and add to return array
+        tmp_yr = accum_arr.count(axis=1)
+        tmp_yr[nan_idx] = np.nan
+        yr_count.iloc[:,i] = tmp_yr
+
+        # Populate return geodf
+        grid_final.loc[i,'grid_ID'] = grid_idx
+        grid_final.loc[i, 'trace_count'] = len(t_IDs)
+        grid_final.loc[i,'accum'] = accum_w.mean()
+        grid_final.loc[i,'std'] = np.sqrt((std_w**2).mean())
+        grid_final.loc[i,'geometry'] = gdf_tmp.iloc[0].geometry
+
+    return grid_final, accum_df, std_df, yr_count
 
 def get_nearest(
     src_points, candidates, k_neighbors=1):
@@ -307,22 +410,45 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     Dpc string goes here.
     """
     tic = time.perf_counter()
-
+    
+    # Preallocate results arrays
     trends_bs = pd.DataFrame(columns=df.columns)
     intercepts = pd.DataFrame(columns=df.columns)
 
+    # In no errors exist, create neutral weights
     if df_err.empty:
         df_err = pd.DataFrame(
             np.ones(df.shape), index=df.index, 
             columns=df.columns)
 
+    # Peform bootstrapping
     for _ in range(nsim):
+        # Randomly resample data
         data_bs = df.sample(
-        len(df), replace=True).sort_index()
+            len(df), replace=True).sort_index()
+        
+        # Generate mean weights
         weights_bs = (
-            1/df_err.loc[data_bs.index]).mean(axis=1)
-        coeffs = np.polyfit(
-            data_bs.index, data_bs, 1, w=weights_bs)
+                1/df_err.loc[data_bs.index]).mean(axis=1)
+
+        # Check for nans (requires for loop w/ 2D array)
+        if np.any(np.isnan(data_bs)):
+            
+            data_ma = np.ma.array(data_bs, mask=np.isnan(data_bs))
+            coeffs = np.zeros((2,data_ma.shape[1]))
+            for idx in range(coeffs.shape[1]):
+                data_i = data_ma[:,idx]
+                if (np.invert(data_i.mask)).sum() < 5:
+                    coeffs[:,idx] = np.nan
+                else:
+                    coeffs[:,idx] = np.ma.polyfit(
+                        data_bs.index, data_i, 1, w=weights_bs)
+                
+        
+        else:
+            # If no nan's present, perform vectorized fitting
+            coeffs = np.polyfit(
+                data_bs.index, data_bs, 1, w=weights_bs)
 
         trends_bs = trends_bs.append(
             pd.Series(coeffs[0], index=df.columns), 
@@ -334,12 +460,12 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     toc = time.perf_counter()
     print(f"Execution time of bootstrapping: {toc-tic} s")
 
-    trend_mu = np.mean(trends_bs)
-    intercept_mu = np.mean(intercepts)
-    trend_lb = np.percentile(trends_bs, 2.5, axis=0)
-    trend_ub = np.percentile(trends_bs, 97.5, axis=0)
+    trend_mu = np.nanmean(trends_bs, axis=0)
+    intercept_mu = np.nanmean(intercepts, axis=0)
+    trend_05 = np.nanpercentile(trends_bs, 2.5, axis=0)
+    trend_95 = np.nanpercentile(trends_bs, 97.5, axis=0)
 
-    return trend_mu, intercept_mu, trend_lb, trend_ub
+    return trend_mu, intercept_mu, trend_05, trend_95
 
 # Function to perform autocorrelation
 def acf(df):
