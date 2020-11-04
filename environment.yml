@@ -4,17 +4,18 @@ channels:
   - defaults
 dependencies:
   - geoviews
-  - jupyter
-  - geopandas
-  - statsmodels
-  - scikit-learn
-  - pylint
-  - descartes
   - xlrd
-  - phantomjs
-  - pillow
-  - selenium
-  - firefox
+  - statsmodels
+  - pylint
+  - geopandas
   - geckodriver
+  - pillow
+  - phantomjs
+  - selenium
+  - jupyter
+  - descartes
+  - firefox
+  - scikit-learn
+  - seaborn
 prefix: /home/durbank/miniconda3/envs/wais-central
 
