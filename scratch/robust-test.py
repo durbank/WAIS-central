@@ -22,10 +22,10 @@ ROOT_DIR = Path(__file__).parents[1]
 
 
 # Set project data directory
-# DATA_DIR = ROOT_DIR.joinpath('data')
-DATA_DIR = Path(
-    '/media/durbank/WARP/Research/Antarctica/Data/'
-    + 'CHPC/PAIPR-results/2020-10-07/Outputs/')
+DATA_DIR = ROOT_DIR.joinpath('data/PAIPR-outputs')
+# DATA_DIR = Path(
+#     '/media/durbank/WARP/Research/Antarctica/Data/'
+#     + 'CHPC/PAIPR-results/2020-10-07/Outputs/')
 
 # Import custom project functions
 import sys
@@ -36,9 +36,11 @@ from my_functions import *
 #%%
 # Import PAIPR-generated data
 dir1 = DATA_DIR.joinpath('20111109/')
-data_0 = import_PAIPR(dir1)
-data_0 = data_0[data_0['QC_flag'] == 0].drop(
-    'QC_flag', axis=1)
+data_raw = import_PAIPR(dir1)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
 data_2011 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
@@ -49,9 +51,11 @@ std2011_ALL = data_2011.pivot(
 
 
 dir2 = DATA_DIR.joinpath('20161109/')
-data_0 = import_PAIPR(dir2)
-data_0 = data_0[data_0['QC_flag'] == 0].drop(
-    'QC_flag', axis=1)
+data_raw = import_PAIPR(dir2)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
 data_2016 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
@@ -67,42 +71,12 @@ ant_outline = gpd.read_file(ant_path)
 
 #%%
 
-# Create df for mean annual accumulation
-data_2011['collect_time'] = (
-    data_2011.collect_time.values.astype(np.int64))
-traces_2011 = data_2011.groupby('trace_ID').mean().drop(
-    'Year', axis=1)
-traces_2011['collect_time'] = (
-    pd.to_datetime(traces_2011.collect_time)
-    .dt.round('1ms'))
-
-# Sort by collect_time and reset trace_ID index
-traces_2011 = (
-    traces_2011.sort_values('collect_time')
-    .reset_index(drop=True))
-traces_2011.index.name = 'trace_ID'
-traces_2011 = traces_2011.reset_index()
-
-# Convert to geodataframe
-gdf_2011 = gpd.GeoDataFrame(
-    traces_2011[['trace_ID', 'collect_time']], 
-    geometry=gpd.points_from_xy(
-    traces_2011.Lon, traces_2011.Lat), 
-    crs="EPSG:4326")
-
-
-
-groups_2016 = data_2016.groupby(
-    ['trace_ID', 'collect_time'])
-traces_2016 = groups_2016.mean()[
-    ['Lat', 'Lon']]
-# traces_2016['idx'] = traces_2016.index
-traces_2016 = traces_2016.reset_index()
-gdf_2016 = gpd.GeoDataFrame(
-    traces_2016[['trace_ID', 'collect_time']], 
-    geometry=gpd.points_from_xy(
-    traces_2016.Lon, traces_2016.Lat), 
-    crs="EPSG:4326")
+# Create gdf of mean results for each trace and 
+# transform to Antarctic Polar Stereographic
+gdf_2011 = long2gdf(data_2011)
+gdf_2011.to_crs(epsg=3031, inplace=True)
+gdf_2016 = long2gdf(data_2016)
+gdf_2016.to_crs(epsg=3031, inplace=True)
 
 # %% [markdown]
 # This next bit utilizes some code derived from that available [here](https://automating-gis-processes.github.io/site/notebooks/L3/nearest-neighbor-faster.html).
@@ -111,25 +85,27 @@ gdf_2016 = gpd.GeoDataFrame(
 #%%
 df_dist = nearest_neighbor(
     gdf_2011, gdf_2016, return_dist=True)
-idx_2011 = df_dist['distance'] <= 250
-dist_2016 = df_dist[idx_2011]
-
-
-gdf_traces = gpd.GeoDataFrame(
-    {'ID_2011': gdf_2011.trace_ID[idx_2011], 
-    'ID_2016': dist_2016.trace_ID}, 
-    geometry=gdf_2011.geometry[idx_2011]).reset_index()
-
-# Convert trace crs to same as Antarctic outline
-gdf_traces = gdf_traces.to_crs(ant_outline.crs)
+idx_2011 = df_dist['distance'] <= 500
+dist_overlap = df_dist[idx_2011]
 
 # Create numpy arrays for relevant results
-accum_2011 = a2011_ALL[
-    a2011_ALL.columns[idx_2011]].to_numpy()
-std_2011 = std2011_ALL[
-    std2011_ALL.columns[idx_2011]].to_numpy()
-accum_2016 = a2016_ALL.iloc[:,dist_2016.index].to_numpy()
-std_2016 = std2016_ALL.iloc[:,dist_2016.index].to_numpy()
+accum_2011 = a2011_ALL.iloc[
+    :,dist_overlap.index].to_numpy()
+std_2011 = std2011_ALL.iloc[
+    :,dist_overlap.index].to_numpy()
+accum_2016 = a2016_ALL.iloc[
+    :,dist_overlap['trace_ID']].to_numpy()
+std_2016 = std2016_ALL.iloc[
+    :,dist_overlap['trace_ID']].to_numpy()
+
+# Create new gdf of subsetted results
+gdf_traces = gpd.GeoDataFrame(
+    {'ID_2011': dist_overlap.index, 
+    'ID_2016': dist_overlap['trace_ID'], 
+    'accum_2011': accum_2011.mean(axis=0), 
+    'accum_2016': accum_2016.mean(axis=0)},
+    geometry=dist_overlap.geometry.values, 
+    crs=dist_overlap.crs).reset_index(drop=True)
 
 #%% 
 # Calculate and compare robust linear regression
@@ -192,6 +168,10 @@ accum_df = pd.DataFrame(
 #%%[markdown]
 # The following are some summary statistics regarding the bias between results of the 2011 flight and the 2016 flight.
 # %%
+
+# sns.kdeplot(res_perc.reshape(res_perc.size))
+pd.DataFrame(res_perc.reshape(res_perc.size)).plot(kind='density')
+
 print(
     f"The mean bias in annual accumulation "
     f"between 2011 and 2016 flights is "
@@ -214,9 +194,9 @@ print(
     f"{res_abs.mean():.2f} mm/yr "
     f"(~{100*res_abs.mean()/accum_2011.mean():.0f}% the long-term mean) "
     f"with a RMSE of {np.sqrt((res_abs**2).mean()):.2f} mm/yr, "
-    f"while the mean 2011 trend is {trend_2011.mean():.2f} "
-    f"with a st. dev. of {trend_2011.std():.2f} (2016 mean and std are "
-    f"{trend_2016.mean():.2f} and {trend_2016.std():.2f} respectively)."
+    f"while the mean 2011 trend is {trend_2011.mean():.2f} mm/yr "
+    f"with a st. dev. of {trend_2011.std():.2f} mm/yr (2016 mean and std are "
+    f"{trend_2016.mean():.2f} mm/yr and {trend_2016.std():.2f} mm/yr respectively)."
 )
 
 # tmp_res = gdf_traces.trend_res.mean()*100
@@ -362,11 +342,11 @@ ts_2016 = pd.DataFrame(accum_2016, index=a2016_ALL.index)
 err_2011 = pd.DataFrame(std_2011, index=a2011_ALL.index)
 err_2016 = pd.DataFrame(std_2016, index=a2016_ALL.index)
 
-ii = 500
+ii = 600
 i_range = np.arange(ii,ii+4)
 
-ts_2011.iloc[:,i_range].plot()
-ts_2016.iloc[:,i_range].plot()
+# ts_2011.iloc[:,i_range].plot()
+# ts_2016.iloc[:,i_range].plot()
 
 plt.figure()
 plt.plot(ts_2011.iloc[:,i_range].mean(axis=1))

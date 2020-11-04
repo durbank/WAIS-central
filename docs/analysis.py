@@ -1,11 +1,12 @@
 # Script for performing analyses used in article
 
-## Set the environment
+#%% Set the environment
 
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
+import matplotlib.pyplot as plt
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
@@ -35,7 +36,7 @@ ANT_proj = ccrs.SouthPolarStereo(
 shp = str(ROOT_DIR.joinpath(
     'data/Ant_basemap/Coastline_medium_res_polygon.shp'))
 
-## Import and format PAIPR-generated results
+#%% Import and format PAIPR-generated results
 
 # Import raw data
 data_list = [folder for folder in DATA_DIR.glob('*')]
@@ -70,103 +71,131 @@ gdf_traces.to_crs(epsg=3031, inplace=True)
 
 
 
-
-def pt2grid(geo_df):
-    """
-    Description.
-    """
-
+# Combine trace time series based on grid cells
+tmp_grids = pts2grid(gdf_traces, resolution=2500)
+gdf_grid, accum_grid, std_grid = trace_combine(
+    tmp_grids, accum_ALL, std_ALL)
 
 
+# Remove results that don't span at least 20 years
+keep_idx = np.invert(accum_grid.isna()).sum() >= 20
+gdf_grid = gdf_grid[keep_idx].reset_index(drop=True)
+accum_grid = accum_grid.loc[:,keep_idx]
+accum_grid.columns = gdf_grid.index
+std_grid = std_grid.loc[:,keep_idx]
+std_grid.columns = gdf_grid.index
 
-
-
-## Perform trend analysis
+#%% Perform trend analysis
 
 trends, _, lb, ub = trend_bs(
-    accum_ALL, 1000, df_err=std_ALL)
-gdf_traces['trend'] = (
-    trends.values / gdf_traces['accum'])
-gdf_traces['t_lb'] = lb / gdf_traces['accum']
-gdf_traces['t_ub'] = ub / gdf_traces['accum']
-gdf_traces['t_abs'] = trends.values
+    accum_grid, 500, df_err=std_ALL)
+gdf_grid['trend'] = trends / gdf_grid['accum']
+gdf_grid['t_lb'] = lb / gdf_grid['accum']
+gdf_grid['t_ub'] = ub / gdf_grid['accum']
+gdf_grid['t_abs'] = trends
 
 
-## Add factor for trend signficance
-
-# insig_idx = gdf_traces.query(
-#     't_lb<0 & t_ub>0').index.values
+# Add factor for trend signficance
+insig_idx = gdf_grid.query(
+    't_lb<0 & t_ub>0').index.values
 sig_idx = np.invert(np.array(
-    [(gdf_traces['t_lb'] < 0).values, 
-    (gdf_traces['t_ub'] > 0).values]).all(axis=0))
+    [(gdf_grid['t_lb'] < 0).values, 
+    (gdf_grid['t_ub'] > 0).values]).all(axis=0))
 
 
-## Plot data inset map
+#%% Plot data inset map
 
 Ant_bnds = gv.Shape.from_shapefile(
     shp, crs=ANT_proj).opts(
         projection=ANT_proj, width=500, height=500)
-trace_plt = gv.Points(
-    gdf_traces, crs=ANT_proj).opts(
-        projection=ANT_proj, color='red')
+trace_plt = gv.Polygons(
+    gdf_grid, crs=ANT_proj).opts(
+        projection=ANT_proj, line_color='red', 
+        fill_color=None)
 Ant_bnds * trace_plt
 
 
-## Plot of mean accumulation
+#%% Plot of mean accumulation
 
 # Get 1/99 range of mean accum
-c_min = np.floor(np.quantile(gdf_traces['accum'], 0.01))
-c_max = np.ceil(np.quantile(gdf_traces['accum'], 0.99))
+# c_min = np.floor(np.quantile(gdf_traces['accum'], 0.01))
+# c_max = np.ceil(np.quantile(gdf_traces['accum'], 0.99))
 
-accum_plt = gv.Points(
-    gdf_traces, 
-    vdims=[
-        hv.Dimension('accum', range=(c_min, c_max)), 
-        'std', 'trace_ID'], 
+accum_plt = gv.Polygons(
+    gdf_grid, 
+    vdims=['accum', 'std'], 
     crs=ANT_proj).opts(
-        projection=ANT_proj, color='accum', 
+        projection=ANT_proj, line_color=None, 
         cmap='viridis', colorbar=True, 
         tools=['hover'])
-accum_plt.opts(width=600, height=400)
-
-
-## Plot linear trend results
-
-trend_plt = gv.Points(
-    gdf_traces, vdims=['trend', 't_lb', 't_ub'], 
+count_plt = gv.Polygons(
+    gdf_grid, vdims='num_trace', 
     crs=ANT_proj).opts(
-        projection=ANT_proj, color='trend', 
+        projection=ANT_proj, line_color=None, 
+        cmap='magma', colorbar=True, 
+        tools=['hover'])
+accum_plt.opts(width=600, height=400)+count_plt.opts(width=600, height=400)
+
+#%% Plot linear trend results
+
+trend_plt = gv.Polygons(
+    gdf_grid, vdims=['trend', 't_lb', 't_ub'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, line_color=None, 
         cmap='coolwarm', symmetric=True, 
         colorbar=True, tools=['hover'])
-sig_plt = gv.Points(
-    gdf_traces[sig_idx], 
+sig_plt = gv.Polygons(
+    gdf_grid[sig_idx], 
     vdims=['trend', 't_lb', 't_ub'], 
     crs=ANT_proj).opts(
-        projection=ANT_proj, color='trend', 
+        projection=ANT_proj, line_color=None, 
         cmap='coolwarm', symmetric=True, 
         colorbar=True, tools=['hover'])
-(trend_plt.opts(width=600, height=400)
-    + sig_plt.opts(width=600, height=400))
+insig_plt = gv.Polygons(
+    gdf_grid.loc[insig_idx], 
+    vdims=['trend', 't_lb', 't_ub'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color_index=None, 
+        fill_alpha=0.6, color='grey', 
+        line_color=None, tools=['hover'])
 
 
-## Random time series plots
+gdf_grid['start_yr'] = (
+    [accum_grid.iloc[:,idx].first_valid_index() 
+    for idx in range(accum_grid.shape[1])])
+yr_plt = gv.Polygons(
+    gdf_grid, vdims=['start_yr', 'trend'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, line_color=None, 
+        cmap='plasma', colorbar=True, 
+        tools=['hover'])
 
-idx_i = np.random.randint(0, accum_ALL.shape[1])
+(sig_plt*insig_plt).opts(
+    width=600, height=400) + yr_plt.opts(
+        width=600, height=400)
+# (trend_plt.opts(width=600, height=400)
+#     + (sig_plt*insig_plt).opts(width=600, height=400))
 
-t_series = accum_ALL.iloc[:,idx_i]
-t_err = std_ALL.iloc[:,idx_i]
+
+#%% Random time series plots
+
+idx = np.random.randint(0, accum_grid.shape[1])
+
+t_series = accum_grid.iloc[:,idx]
+t_MoE = 1.96*(
+    std_grid.iloc[:,idx]
+    / np.sqrt(gdf_grid['num_trace'].astype('float')[idx]))
 
 t_series.plot(color='red', linewidth=2)
-(t_series+2*t_err).plot(color='red', linestyle='--')
-(t_series-2*t_err).plot(color='red', linestyle='--')
-
-## Code to aggregate results based on grids
-
-# Useful websites for doing this...
-# https://james-brennan.github.io/posts/fast_gridding_geopandas/
-# https://matthewrocklin.com/blog/work/2017/09/21/accelerating-geopandas-1
-# http://xarray.pydata.org/en/stable/pandas.html
-# http://xarray.pydata.org/en/stable/generated/xarray.Dataset.from_dataframe.html
+(t_series+t_MoE).plot(color='red', linestyle='--')
+(t_series-t_MoE).plot(color='red', linestyle='--')
 
 
+idx = [0, 200, 400, 600]
+t_series = accum_grid.iloc[:,idx]
+t_MoE = 1.96*(
+    std_grid.iloc[:,idx]
+    / np.sqrt(gdf_grid['num_trace'].astype('float')[idx]))
+t_series.plot(linewidth=2)
 
+#%%
