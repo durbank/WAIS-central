@@ -242,7 +242,7 @@ tmp_grids = pts2grid(gdf_traces, resolution=5000)
     std_grid_ALL, yr_count_ALL) = trace_combine(
     tmp_grids, accum_ALL, std_ALL)
 
-# Subset results to period 1979-2010
+# Subset results to period 1980-2010
 yr_start = 1980
 yr_end = 2009
 keep_idx = np.invert(
@@ -402,39 +402,6 @@ tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
     std_BIG, yr_count_BIG) = trace_combine(
     tmp_grid_big, accum_ALL, std_ALL)
 
-
-# Big grid cell plot
-grid_plt = gv.Polygons(
-    gdf_BIG, vdims=['trace_count', 'grid_ID'], 
-    crs=ANT_proj).opts(
-        projection=ANT_proj, 
-        line_color='black', color_index=None, 
-        color=None, tools=['hover'])
-
-# Radar data plot
-radar_plt = gv.Polygons(
-    gdf_grid_ALL, crs=ANT_proj).opts(
-        projection=ANT_proj, 
-        line_color=None, color='red')
-
-# Core data plot
-core_plt = gv.Points(
-    gdf_cores, crs=ANT_proj, 
-    vdims=['Name']).opts(
-        projection=ANT_proj, color='blue', 
-        line_color='black', marker='triangle', 
-        size=7, tools=['hover'])
-
-# Antarctica boundaries
-Ant_bnds = gv.Polygons(
-    gdf_ANT, crs=ANT_proj).opts(
-        projection=ANT_proj, color='grey', 
-        alpha=0.3)
-
-# Add plot to workspace
-(grid_plt * radar_plt * core_plt).opts(
-    width=700, height=450)
-
 # %%
 PIG_group = [27, 28, 29, 34, 35]
 DIV_group = [25, 26, 31, 32]
@@ -446,18 +413,53 @@ grid_groups = [
     PIG_group, DIV_group, 
     ROSS_group, group_3, group_4]
 
-for group in grid_groups:
+import string
+alphabet = list(string.ascii_uppercase)
+poly_groups = []
+group_cmap = {
+    'A': 'midnightblue', 'B': 'mediumseagreen', 
+    'C': 'purple', 'D': 'olive', 'E': 'saddlebrown'}
+
+for i, group in enumerate(grid_groups):
+    
     group_idx = [
         idx for idx, row in gdf_BIG.iterrows() 
         if row['grid_ID'] in group]
     gdf_group = gdf_BIG.loc[group_idx]
     accum_group = accum_BIG.loc[:,group_idx]
     count_group = yr_count_BIG.loc[:,group_idx]
+    
+    
+    poly = gdf_group.geometry.unary_union
+    cores_group = gdf_cores[
+        gdf_cores.geometry.within(poly)]
+    core_comp = core_ACCUM[
+        cores_group.index].loc[
+            accum_group.index[0]:].mean(axis=1)
+    poly_groups.append(poly)
 
+    
+    
+
+    
     fig, (ax1, ax2) = plt.subplots(2, 1)
-    accum_group.plot(ax=ax1)
+    fig.suptitle(
+        'Grid Group '+alphabet[i]+' time series', 
+        color=group_cmap[alphabet[i]])
+    accum_group.plot(ax=ax1, label='_hidden_')
+    core_comp.plot(
+        ax=ax1, color='grey', linestyle='--')
     count_group.plot(ax=ax2)
+    ax1.get_legend().remove()
+    ax2.get_legend().remove()
+    ax1.set_ylabel('SMB (mm/a)')
+    ax2.set_ylabel('No. records')
     plt.show()
+
+
+gdf_groups = gpd.GeoDataFrame(
+    {'Group_ID': alphabet[0:len(poly_groups)]}, 
+    geometry=poly_groups, crs=cores_group.crs)
 
 
 # a_max = gdf_BIG.accum.max()
@@ -480,7 +482,47 @@ for group in grid_groups:
 #     width=700, height=450).redim.range(accum=(a_min,a_max))
 
 
+# %%
 
+# Grid groups
+group_plt = gv.Polygons(
+    gdf_groups, vdims='Group_ID', 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, line_color=None, 
+        color_index='Group_ID', cmap=group_cmap, tools=['hover'], 
+        fill_alpha=0.5)
+
+# Big grid cell plot
+grid_plt = gv.Polygons(
+    gdf_BIG, 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, 
+        line_color='black', color_index=None, 
+        color=None)
+
+# Radar data plot
+radar_plt = gv.Polygons(
+    gdf_grid_ALL, crs=ANT_proj).opts(
+        projection=ANT_proj, 
+        line_color=None, color='red')
+
+# Core data plot
+core_plt = gv.Points(
+    gdf_cores, crs=ANT_proj, 
+    vdims=['Name']).opts(
+        projection=ANT_proj, color='blue', 
+        line_color='black', marker='triangle', 
+        size=7, tools=['hover'])
+
+# # Antarctica boundaries
+# Ant_bnds = gv.Polygons(
+#     gdf_ANT, crs=ANT_proj).opts(
+#         projection=ANT_proj, color='grey', 
+#         alpha=0.3)
+
+# Add plot to workspace
+(group_plt * grid_plt * radar_plt * core_plt).opts(
+    width=700, height=450)
 
 
 
