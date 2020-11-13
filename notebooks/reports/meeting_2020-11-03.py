@@ -68,7 +68,6 @@ from bokeh.io import output_notebook
 output_notebook()
 hv.extension('bokeh')
 gv.extension('bokeh')
-import matplotlib.pyplot as plt
 from shapely.geometry import Polygon, Point
 
 # Set project root directory
@@ -231,13 +230,13 @@ Ant_bnds = gv.Shape.from_shapefile(
 # PAIPR-generated results first go through a number of preprocessing steps prior to analysis.
 # The multiple flightlines making up the data result in overlapping results.
 # We therefore aggregate all results within a given grid cell into a single time series, with a grid cell size of 2.5 km.
-# We further subset the resultant dataset to time series with full coverage for 1979-2010 to ensure a consistent time period.
+# We further subset the resultant dataset to time series with full coverage for 1980-2010 to ensure a consistent time period.
 # After processing and filtering, the final dataset consists of 839 unique annually resolved time series of SMB (with annual uncertainty) covering a consistent 31-year time period.
 # 
 # %%
 
 # Combine trace time series based on grid cells
-tmp_grids = pts2grid(gdf_traces, resolution=5000)
+tmp_grids = pts2grid(gdf_traces, resolution=2500)
 (gdf_grid_ALL, accum_grid_ALL, 
     std_grid_ALL, yr_count_ALL) = trace_combine(
     tmp_grids, accum_ALL, std_ALL)
@@ -261,7 +260,7 @@ gdf_core = gdf_cores[keep_idx]
 gdf_core['accum'] = accum_core.mean()
 
 # %%[markdown]
-# We generate estimates of the linear trend in annual SMB for each of the 839 time series, weighted by the uncertainty for each year.
+# We generate estimates of the linear trend in annual SMB for each of the 924 time series, weighted by the uncertainty for each year.
 # The high variability in annual SMB, combined with the short duration of the records, means these trend analyses can be unstable and are susceptible to leverage effects.
 # To enhance the robustness of our results, we perform probabalistic bootstrapping with replacement (1000 simulations per time series) to minimize the influence of these issues and to generate 95% confidence intervals for the trend estimates. 
 # 
@@ -301,12 +300,16 @@ sig_core = np.invert(np.array(
 # %%[markdown]
 # ## Results
 # 
-# Figure X shows the mean accumulation (mm w.e. per year) generated from radar echograms using PAIPR (1979-2010) and the mean accumulation of the selected ice cores for the same time period (trianges).
+# Figure X shows the mean accumulation (mm w.e. per year) generated from radar echograms using PAIPR (1980-2010) and the mean accumulation of the selected ice cores for the same time period (triangles).
+# *NOTE: the following plots are dynamic, so it is possible to zoom and pan, with additional info available as a mouse-over. The figures are zoomed to the extent of the radar data by default, but there are additional cores included beyond this scope that can be viewed by zooming out or panning.* 
 # 
 #%% Plot of mean accumulation
 
 ac_max = gdf_grid.accum.max()
 ac_min = gdf_grid.accum.min()
+gdf_bounds = {
+    'x_range': tuple(gdf_grid.total_bounds[0::2]), 
+    'y_range': tuple(gdf_grid.total_bounds[1::2])}
 # ac_max = np.max(
 #     [gdf_core.accum.max(), gdf_grid.accum.max()])
 # ac_min = np.min(
@@ -332,18 +335,23 @@ count_plt = gv.Polygons(
         cmap='magma', colorbar=True, 
         tools=['hover'])
 (accum_plt*accum_core_plt).opts(
-    width=600, height=400).redim.range(accum=(ac_min,ac_max))
+    width=600, height=400, 
+    xlim=gdf_bounds['x_range'], 
+    ylim=gdf_bounds['y_range']).redim.range(
+    accum=(ac_min,ac_max))
 # ((accum_plt*accum_core_plt).opts(
 #     width=600, height=400).redim.range(accum=(ac_min,ac_max))
 #     + count_plt.opts(width=600, height=400))
 
 # %%[markdown]
-# The results show high variability in mean accumulation, but the overall spatial patterns matches with previous observations of decreased SMB towards the interior of the ice sheet.
+# The results show high variability in mean accumulation, but the overall spatial patterns matche with previous observations of decreased SMB towards the interior of the ice sheet.
 # The high spatial variability seen in the data also support previous findings, with the most likely cause topographic variation (Dattler et. al., 2019).
 # 
-# The linear trends are presented in Figure X as % change per year relative to the multidecadal mean SMB.
-# Insignificant trends are shown in grey.
-# Ice cores are shown as triangles. 
+# The linear trends are presented below in Figure X. 
+# The left panel shows the linear trends (1980-2010) as % change per year relative to the multidecadal mean SMB.
+# Insignificant trends are shown in grey, with ice cores displayed as triangles.
+# The right panel shows the 95% confidence margin of error for the radar results, again expressed as % change per year relative to the multidecadal mean SMB.
+# *NOTE: Similar to the previous plot, this plot defaults to the extent of the radar data, but additional core results are viewable beyond this extent.*
 #  
 #%% Plot linear trend results
 
@@ -351,6 +359,13 @@ t_max = np.max(
     [gdf_grid.trend.max(), gdf_core.trend.max()])
 t_min = np.min(
     [gdf_grid.trend.min(), gdf_core.trend.min()])
+
+gdf_ERR = gdf_grid.copy().drop(
+    ['accum', 'std', 't_lb', 
+    't_ub', 't_abs'], axis=1)
+gdf_ERR['MoE'] = (
+    gdf_grid['t_ub'] 
+    - gdf_grid['t_lb']) / 2
 
 sig_plt = gv.Polygons(
     gdf_grid[sig_idx], 
@@ -380,17 +395,83 @@ insig_core_plt = gv.Points(
     crs=ANT_proj).opts(
         projection=ANT_proj, color='grey', alpha=0.75,  
         size=7, line_color='black', marker='triangle', tools=['hover'])
+tERR_plt = gv.Polygons(
+    gdf_ERR, vdims=['MoE', 'trend'], 
+    crs=ANT_proj).opts(projection=ANT_proj, 
+    line_color=None, cmap='plasma', colorbar=True, 
+    tools=['hover'])
 insig_plt*sig_plt*insig_core_plt*sig_core_plt.opts(
-    width=600, height=400).redim.range(trend=(t_min,t_max))
+    width=600, height=400, 
+    xlim=gdf_bounds['x_range'], 
+    ylim=gdf_bounds['y_range']).redim.range(trend=(t_min,t_max)) + tERR_plt.opts(width=600, height=400, 
+    xlim=gdf_bounds['x_range'], 
+    ylim=gdf_bounds['y_range'])
 
+# %%[markdown]
+# The next figure provides additional context from a larger suite of surrounding ice cores.
+# To achieve this, we include any nearby cores with at least some data in the period 1975-2016 and perform bootstrapped trend analysis on the time series.
+# The following figure is therefore similar to the preceding figure, but with more surrounding cores.
+# The size of the cores (triangles in the plot) represent the length of time used to calculate their trend, with the largest covering the full period (1975-2016) and the smallest covering only a handful of years.
+# Ice cores tend to show increasing accumulation near the Peninsula, grading to insignificant and negative accumulation rates moving westward (down in the plot).
+#  
+# %% Trends with all cores (not all cover full time period)
 
+# Keep all core data 1975 to present
+cores_long = core_ACCUM.loc[1975:]
+gdf_long = gdf_cores
+gdf_long['accum'] = cores_long.mean()
 
+# Create size variable based on number of years in record
+tmp = np.invert(
+    cores_long.isna()).sum()
+gdf_long['size'] = 10*tmp/tmp.max()
 
+# Calculate trends in cores
+trends, _, lb, ub = trend_bs(cores_long, 1000)
+gdf_long['trend'] = trends / gdf_long['accum']
+gdf_long['t_lb'] = lb / gdf_long['accum']
+gdf_long['t_ub'] = ub / gdf_long['accum']
+gdf_long['t_abs'] = trends
 
+# Determine trend significance for cores
+insig_core = gdf_long.query(
+    't_lb<0 & t_ub>0').index.values
+sig_core = np.invert(np.array(
+    [(gdf_long['t_lb'] < 0).values, 
+    (gdf_long['t_ub'] > 0).values]).all(axis=0))
 
+# Plot trends since 1975 (all)
+t_max = np.max(
+    [gdf_grid.trend.max(), gdf_long.trend.max()])
+t_min = np.min(
+    [gdf_grid.trend.min(), gdf_long.trend.min()])
 
+sig_core_plt = gv.Points(
+    gdf_long[sig_core], 
+    vdims=['Name', 'trend', 't_lb', 't_ub', 'size'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='trend', 
+        cmap='coolwarm_r', symmetric=True, 
+        colorbar=True, size='size', 
+        line_color='black', 
+        marker='triangle', tools=['hover'])
+insig_core_plt = gv.Points(
+    gdf_long.loc[insig_core], 
+    vdims=['Name', 'trend', 't_lb', 't_ub', 'size'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='grey', 
+        alpha=0.75, size='size', line_color='black', marker='triangle', tools=['hover'])
+insig_plt*sig_plt*insig_core_plt*sig_core_plt.opts(
+    width=600, height=400).redim.range(
+        trend=(t_min,t_max))
 
-
+# %%[markdown]
+# In order to better investigate the temporal characteristics of annual SMB in the data, we aggregate our results into 100 km grid cells and generate mean time series for each grid cell.
+# These grid cell time series are then grouped into 5 distinct regions that demonstrate similar temporal responses.
+# The following plots show the time series within each group, along with companion plots showing the number of observations represented for each year in the 100-km grid composite records.
+# Any cores within each group are also combined, with the composite core plotted in the figure as a dashed grey line.
+# The final figure shows how the 100 km grid cells are divided into their respective groups.
+# 
 # %% Larger grid cells and composite time series
 
 gdf_cores['accum'] = core_ACCUM.loc[
@@ -459,7 +540,7 @@ for i, group in enumerate(grid_groups):
 
 gdf_groups = gpd.GeoDataFrame(
     {'Group_ID': alphabet[0:len(poly_groups)]}, 
-    geometry=poly_groups, crs=cores_group.crs)
+    geometry=poly_groups, crs=gdf_BIG.crs)
 
 
 # a_max = gdf_BIG.accum.max()
@@ -483,6 +564,10 @@ gdf_groups = gpd.GeoDataFrame(
 
 
 # %%
+
+bounds = {
+    'x_range': tuple(gdf_BIG.total_bounds[0::2]), 
+    'y_range': tuple(gdf_BIG.total_bounds[1::2])}
 
 # Grid groups
 group_plt = gv.Polygons(
@@ -522,7 +607,8 @@ core_plt = gv.Points(
 
 # Add plot to workspace
 (group_plt * grid_plt * radar_plt * core_plt).opts(
-    width=700, height=450)
+    width=700, height=450, xlim=bounds['x_range'], 
+    ylim=bounds['y_range'])
 
 
 
@@ -550,52 +636,6 @@ core_plt = gv.Points(
 # - Relatively short duration (~30 years), so questions of how much of the observed trends result from internal climate variabliity rather a distinct climatic change
 # - Use of linear trends could obscure the onset of decline in SMB rates
 #  
-#%% Compare core and radar time series
-
-# Get radar grid centroids
-grid_pts = gdf_grid.copy()
-grid_pts['geometry'] = grid_pts['geometry'].centroid
-
-df_dist = nearest_neighbor(
-    gdf_core, grid_pts, return_dist=True)
-idx_match = df_dist['distance'] <= 10000
-dist_overlap = df_dist[idx_match]
-
-# Create numpy arrays for relevant results
-core_overlap = accum_core.iloc[
-    :,dist_overlap.index]
-radar_idx = []
-for val in dist_overlap['grid_ID'].values:
-    row = gdf_grid[gdf_grid['grid_ID'] == val]
-    radar_idx.append(row.index)
-r_idx = [val[0] for val in radar_idx]
-accum_overlap = accum_grid.loc[:,r_idx]
-std_overlap = std_grid.loc[:,r_idx]
-gdf_overlap = gdf_grid.loc[r_idx]
-
-for _ in range(len(gdf_overlap)):
-    
-    ts_core = core_overlap.iloc[:,_]
-    ts_trace = accum_overlap.iloc[:,_]
-    ts_MoE = 1.96*(
-        std_overlap.iloc[:,_] 
-        / np.sqrt(
-            gdf_overlap['trace_count']
-            .astype('float').iloc[_]))
-
-    plt.figure()
-    plt.title(core_overlap.columns[_])
-    ax = ts_core.plot(
-        color='blue', linewidth=2, label='Core')
-    ts_trace.plot(
-        ax=ax, color='red', linewidth=2, label='PAIPR')
-    (ts_trace+ts_MoE).plot(
-        ax=ax, color='red', linestyle='--', label='_hidden')
-    (ts_trace-ts_MoE).plot(
-        ax=ax, color='red', linestyle='--', label='_hidden')
-    plt.legend()
-    plt.show()
-
 # %%[markdown]
 # ## Supplement
 # 
@@ -735,14 +775,14 @@ plt_trend2011 = gv.Points(
     gdf_2011, crs=ANT_proj, 
     vdims=['trend','t_lb','t_ub']).opts(
         projection=ANT_proj, color='trend', 
-        cmap='coolwarm', symmetric = True, 
+        cmap='coolwarm_r', symmetric = True, 
         colorbar=True, 
         tools=['hover'], width=600, height=400)
 plt_trend2016 = gv.Points(
     gdf_2016, crs=ANT_proj, 
     vdims=['trend','t_lb','t_ub']).opts(
         projection=ANT_proj, color='trend', 
-        cmap='coolwarm', colorbar=True, 
+        cmap='coolwarm_r', colorbar=True, 
         symmetric=True, 
         tools=['hover'], width=600, height=400)
 plt_trend2011 + plt_trend2016
@@ -1063,3 +1103,4 @@ scatt_yr = hv.Points(
 # The mid-accum site shows minimal bias.
 # Also note that uncertainties in these trends are high compared to trend magnitudes, with uncertainties of 1-2 percent of the multidecadal mean accumulation. 
 # 
+# %%
