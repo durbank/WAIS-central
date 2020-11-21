@@ -460,10 +460,13 @@ insig_core_plt = gv.Points(
     vdims=['Name', 'trend', 't_lb', 't_ub', 'size'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='grey', 
-        alpha=0.75, size='size', line_color='black', marker='triangle', tools=['hover'])
+        alpha=0.75, size='size', line_color='black', 
+        marker='triangle', tools=['hover'])
 insig_plt*sig_plt*insig_core_plt*sig_core_plt.opts(
     width=600, height=400).redim.range(
         trend=(t_min,t_max))
+
+
 
 # %%[markdown]
 # In order to better investigate the temporal characteristics of annual SMB in the data, we aggregate our results into 100 km grid cells and generate mean time series for each grid cell.
