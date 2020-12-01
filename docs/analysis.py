@@ -42,9 +42,9 @@ gdf_ANT = gpd.read_file(shp)
 
 # Import raw data
 data_list = [folder for folder in DATA_DIR.glob('*')]
-data_list = [
-    path for path in data_list 
-    if "20141103" not in str(path)] #Removes 2014 results, as there are too few and are suspect
+# data_list = [
+#     path for path in data_list 
+#     if "20141103" not in str(path)] #Removes 2014 results, as there are too few and are suspect
 data_raw = pd.DataFrame()
 for folder in data_list:
     data = import_PAIPR(folder)
@@ -114,7 +114,7 @@ gdf_cores = core_locs[keep_idx]
 core_ACCUM = core_ALL.loc[:,keep_idx].sort_index()
 
 # Remove cores with less than 5 years of data
-gdf_cores.query('Duration >= 5', inplace=True)
+gdf_cores.query('Duration >= 10', inplace=True)
 
 # Remove cores with missing elev data
 # (this only gets rid of Ronne ice shelf cores)
@@ -124,36 +124,22 @@ gdf_cores = gdf_cores[gdf_cores['Elev'].notna()]
 gdf_cores.drop('SEAT-10-4', inplace=True)
 gdf_cores.drop('BER11C95_25', inplace=True)
 
+
+gdf_cores.drop('SEAT-11-1', inplace=True)
+gdf_cores.drop('SEAT-11-2', inplace=True)
+gdf_cores.drop('SEAT-11-3', inplace=True)
+gdf_cores.drop('SEAT-11-4', inplace=True)
+gdf_cores.drop('SEAT-11-6', inplace=True)
+gdf_cores.drop('SEAT-11-7', inplace=True)
+gdf_cores.drop('SEAT-11-8', inplace=True)
+
 # Remove additional cores from core time series
 core_ACCUM = core_ACCUM[gdf_cores.index]
-
-# %% Study site and data figure
-
-# Radar data plot
-radar_plt = gv.Points(
-    gdf_traces.sample(2500), crs=ANT_proj).opts(
-        projection=ANT_proj, color='red')
-
-# Core data plot
-core_plt = gv.Points(
-    gdf_cores, crs=ANT_proj, 
-    vdims=['Name']).opts(
-        projection=ANT_proj, color='blue', size=5, 
-        tools=['hover'])
-
-# Antarctica boundaries
-Ant_bnds = gv.Shape.from_shapefile(
-    shp, crs=ANT_proj).opts(
-        projection=ANT_proj, color='silver')
-
-# Add plot to workspace
-(Ant_bnds * radar_plt * core_plt).opts(
-    width=500, height=500, bgcolor='lightsteelblue')
 
 # %%
 
 # Combine trace time series based on grid cells
-tmp_grids = pts2grid(gdf_traces, resolution=2500)
+tmp_grids = pts2grid(gdf_traces, resolution=1000)
 (gdf_grid_ALL, accum_grid_ALL, 
     std_grid_ALL, yr_count_ALL) = trace_combine(
     tmp_grids, accum_ALL, std_ALL)
@@ -181,10 +167,14 @@ gdf_core['accum'] = accum_core.mean()
 # Calculate trends in radar
 trends, _, lb, ub = trend_bs(
     accum_grid, 1000, df_err=std_grid)
-gdf_grid['trend'] = trends / gdf_grid['accum']
-gdf_grid['t_lb'] = lb / gdf_grid['accum']
-gdf_grid['t_ub'] = ub / gdf_grid['accum']
-gdf_grid['t_abs'] = trends
+gdf_grid['trend'] = trends
+gdf_grid['t_lb'] = lb
+gdf_grid['t_ub'] = ub
+gdf_grid['t_perc'] = trends / gdf_grid['accum']
+# gdf_grid['trend'] = trends / gdf_grid['accum']
+# gdf_grid['t_lb'] = lb / gdf_grid['accum']
+# gdf_grid['t_ub'] = ub / gdf_grid['accum']
+# gdf_grid['t_abs'] = trends
 
 # Add factor for trend signficance
 insig_idx = gdf_grid.query(
@@ -195,10 +185,10 @@ sig_idx = np.invert(np.array(
 
 # Calculate trends in cores
 trends, _, lb, ub = trend_bs(accum_core, 1000)
-gdf_core['trend'] = trends / gdf_core['accum']
-gdf_core['t_lb'] = lb / gdf_core['accum']
-gdf_core['t_ub'] = ub / gdf_core['accum']
-gdf_core['t_abs'] = trends
+gdf_core['trend'] = trends
+gdf_core['t_lb'] = lb
+gdf_core['t_ub'] = ub
+gdf_core['t_perc'] = trends / gdf_core['accum']
 
 # Determine trend significance for cores
 insig_core = gdf_core.query(
@@ -207,32 +197,94 @@ sig_core = np.invert(np.array(
     [(gdf_core['t_lb'] < 0).values, 
     (gdf_core['t_ub'] > 0).values]).all(axis=0))
 
+# %% Calculate trends using non-Bootstrapping
+
+import statsmodels.api as sm
+
+rlm_param = []
+rlm_Tlb = []
+rlm_Tub = []
+
+for name, series in accum_grid.items():
+    X = sm.add_constant(series.index.values)
+    y = series.values
+    # W = 1/(std_grid.loc[:,name].values**2)
+    # mod = sm.WLS(y,X, weights=W).fit()
+    mod = sm.RLM(y,X).fit()
+    rlm_param.append(mod.params[1])
+    # wls_r2.append(mod.rsquared)
+    rlm_Tlb.append(mod.conf_int()[1,0])
+    rlm_Tub.append(mod.conf_int()[1,1])
+
+gdf_grid['rlm_T'] = rlm_param
+gdf_grid['rlm_lb'] = rlm_Tlb
+gdf_grid['rlm_ub'] = rlm_Tub
+
+
 # %% Calculate trends for partial-coverage cores
 
 # Keep all core data 1979 to present
-cores_long = core_ACCUM.loc[1979:]
+cores_long = core_ACCUM.loc[yr_start:]
 gdf_long = gdf_cores
 gdf_long['accum'] = cores_long.mean()
 
 # Create size variable based on number of years in record
 tmp = np.invert(
     cores_long.isna()).sum()
-gdf_long['size'] = 10*tmp/tmp.max()
+gdf_long['size'] = 12*tmp/tmp.max()
 
 # Calculate trends in cores
 trends, _, lb, ub = trend_bs(cores_long, 1000)
-gdf_long['trend'] = trends / gdf_long['accum']
-gdf_long['t_lb'] = lb / gdf_long['accum']
-gdf_long['t_ub'] = ub / gdf_long['accum']
-gdf_long['t_abs'] = trends
+gdf_long['trend'] = trends
+gdf_long['t_lb'] = lb
+gdf_long['t_ub'] = ub
+gdf_long['t_perc'] = trends / gdf_long['accum']
+
+# %% Study site inset plot
+
+gdf_bounds = {
+    'x_range': tuple(gdf_grid.total_bounds[0::2]+[-20000,30000]), 
+    'y_range': tuple(gdf_grid.total_bounds[1::2]+[-40000,15000])}
+
+# Bounds of radar data
+poly_bnds = Polygon([
+    [gdf_bounds['x_range'][0], gdf_bounds['y_range'][0]], 
+    [gdf_bounds['x_range'][0], gdf_bounds['y_range'][1]], 
+    [gdf_bounds['x_range'][1], gdf_bounds['y_range'][1]], 
+    [gdf_bounds['x_range'][1], gdf_bounds['y_range'][0]]
+    ])
+radar_bnds = gv.Polygons(
+    poly_bnds, crs=ANT_proj).opts(
+        projection=ANT_proj, line_color='red', 
+        line_width=3, color=None)
+
+# Radar data plot
+radar_plt = gv.Polygons(
+    gdf_grid, crs=ANT_proj).opts(
+        projection=ANT_proj, color='black')
+
+# Core data plot
+core_plt = gv.Points(
+    gdf_long, crs=ANT_proj, 
+    vdims=['Name']).opts(
+        projection=ANT_proj, color='blue', size=5, 
+        tools=['hover'])
+
+# Antarctica boundaries
+Ant_bnds = gv.Shape.from_shapefile(
+    shp, crs=ANT_proj).opts(
+        projection=ANT_proj, color='silver')
+
+# Add plot to workspace
+# (Ant_bnds * radar_plt * core_plt).opts(
+#     width=500, height=500, bgcolor='lightsteelblue')
+(Ant_bnds * radar_bnds).opts(
+    width=500, height=500, bgcolor='lightsteelblue')
 
 # %% Plot mean accumulation
 
 ac_max = gdf_grid.accum.max()
 ac_min = gdf_grid.accum.min()
-gdf_bounds = {
-    'x_range': tuple(gdf_grid.total_bounds[0::2]+[-20000,30000]), 
-    'y_range': tuple(gdf_grid.total_bounds[1::2]+[-40000,15000])}
 # ac_max = np.max(
 #     [gdf_core.accum.max(), gdf_grid.accum.max()])
 # ac_min = np.min(
@@ -274,7 +326,7 @@ t_min = np.min(
 
 gdf_ERR = gdf_grid.copy().drop(
     ['accum', 'std', 't_lb', 
-    't_ub', 't_abs'], axis=1)
+    't_ub', 't_perc'], axis=1)
 gdf_ERR['MoE'] = (
     gdf_grid['t_ub'] 
     - gdf_grid['t_lb']) / 2
@@ -341,7 +393,7 @@ t_plt*core_t_plt.opts(
     width=600, height=400, bgcolor='silver', 
     xlim=gdf_bounds['x_range'], 
     ylim=gdf_bounds['y_range']).redim.range(
-        trend=(-0.03,0.03)) + tERR_plt.opts(
+        trend=(-15,15)) + tERR_plt.opts(
         width=600, height=400, bgcolor='silver',
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range']) + count_plt.opts(
@@ -374,7 +426,93 @@ coreALL_plt = gv.Points(
 coreALL_plt*Ant_bnds*rLOC_plt*coreALL_plt.opts(
     width=600, height=400, 
     bgcolor='lightsteelblue').redim.range(
-        trend=(-0.03,0.03))
+        trend=(-15,15))
+
+
+
+# %% Mean accum and trends for full time series
+
+gdf_grid_ALL['Duration'] = accum_grid_ALL.notna().sum()
+gdf_grid_ALL.query('Duration >= 10', inplace=True)
+accum_grid_ALL = accum_grid_ALL[gdf_grid_ALL.index]
+std_grid_ALL = std_grid_ALL[gdf_grid_ALL.index]
+yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
+
+
+ac_max = np.quantile(gdf_grid_ALL.accum, 0.99)
+ac_min = np.quantile(gdf_grid_ALL.accum, 0.01)
+
+
+aALL_plt = gv.Polygons(
+    gdf_grid_ALL, vdims=['accum', 'std'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='accum', 
+        cmap='viridis', colorbar=True, 
+        line_color=None, tools=['hover'])
+duration_plt = gv.Polygons(
+    gdf_grid_ALL, vdims=['Duration', 'trace_count'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='Duration', 
+        cmap='magma', colorbar=True, 
+        line_color=None, tools=['hover'])
+
+(
+    aALL_plt.opts(
+        width=600, height=400, 
+        bgcolor='silver').redim.range(
+        accum=(ac_min,ac_max)) 
+    + duration_plt.opts(
+    width=600, height=400, bgcolor='silver')
+)
+# %% 
+
+# Calculate trends for full duration
+trends, _, lb, ub = trend_bs(
+    accum_grid_ALL, 1000, df_err=std_grid_ALL)
+gdf_grid_ALL['trend'] = trends
+gdf_grid_ALL['t_lb'] = lb
+gdf_grid_ALL['t_ub'] = ub
+gdf_grid_ALL['t_perc'] = trends / gdf_grid_ALL['accum']
+
+# %%
+
+tr_max = np.quantile(gdf_grid_ALL.trend, 0.99)
+tr_min = np.quantile(gdf_grid_ALL.trend, 0.01)
+tALL_plt = gv.Polygons(
+    data=gdf_grid_ALL, 
+    vdims=['trend', 't_lb', 't_ub'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, line_color=None, 
+        cmap='coolwarm_r', symmetric=True, 
+        colorbar=True, tools=['hover'])
+
+
+gdf_ERR_ALL = gdf_grid_ALL.copy().drop(
+    ['accum', 'std', 't_lb', 
+    't_ub', 't_perc'], axis=1)
+gdf_ERR_ALL['MoE'] = (
+    gdf_grid_ALL['t_ub'] 
+    - gdf_grid_ALL['t_lb']) / 2
+ERR_max = np.quantile(gdf_ERR_ALL.MoE, 0.99)
+ERR_min = np.quantile(gdf_ERR_ALL.MoE, 0.01)
+
+ERR_all_plt = gv.Polygons(
+    gdf_ERR_ALL, vdims=['MoE', 'trend'], 
+    crs=ANT_proj).opts(projection=ANT_proj, 
+    line_color=None, cmap='plasma', colorbar=True, 
+    tools=['hover'])
+
+(
+    tALL_plt.opts(
+        width=600, height=400, 
+        bgcolor='silver').redim.range(
+        trend=(tr_min,tr_max))
+    + ERR_all_plt.opts(
+        width=600, height=400, 
+        bgcolor='silver').redim.range(
+            MoE=(ERR_min,ERR_max))
+)
+
 
 # %% Larger grid cells and composite time series
 
@@ -386,6 +524,64 @@ tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
 (gdf_BIG, accum_BIG, 
     std_BIG, yr_count_BIG) = trace_combine(
     tmp_grid_big, accum_ALL, std_ALL)
+
+gdf_BIG['Duration'] = accum_BIG.notna().sum()
+
+# Calculate trends for large grid cells
+trends, _, lb, ub = trend_bs(
+    accum_BIG, 1000, df_err=std_BIG)
+gdf_BIG['trend'] = trends
+gdf_BIG['t_lb'] = lb
+gdf_BIG['t_ub'] = ub
+gdf_BIG['t_perc'] = trends / gdf_BIG['accum']
+
+# %%
+
+tr_max = np.quantile(gdf_BIG.trend, 0.99)
+tr_min = np.quantile(gdf_BIG.trend, 0.01)
+tBIG_plt = gv.Polygons(
+    data=gdf_BIG, 
+    vdims=['trend', 't_lb', 't_ub'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, line_color=None, 
+        cmap='coolwarm_r', symmetric=True, 
+        colorbar=True, tools=['hover'])
+
+sig_BIG = np.invert(np.array(
+    [(gdf_BIG['t_lb'] < 0).values, 
+    (gdf_BIG['t_ub'] > 0).values]).all(axis=0))
+sig_plt = gv.Polygons(
+    data=gdf_BIG[sig_BIG], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, line_color='black', 
+        line_width=2, color=None)
+
+
+ERR_BIG = gdf_BIG.copy().drop(
+    ['accum', 'std', 't_lb', 
+    't_ub', 't_perc'], axis=1)
+ERR_BIG['MoE'] = (
+    gdf_BIG['t_ub'] 
+    - gdf_BIG['t_lb']) / 2
+ERR_max = np.quantile(ERR_BIG.MoE, 0.99)
+ERR_min = np.quantile(ERR_BIG.MoE, 0.01)
+
+ERR_BIG_plt = gv.Polygons(
+    ERR_BIG, vdims=['MoE', 'trend'], 
+    crs=ANT_proj).opts(projection=ANT_proj, 
+    line_color=None, cmap='plasma', colorbar=True, 
+    tools=['hover'])
+
+(
+    (tBIG_plt*sig_plt).opts(
+        width=600, height=400, 
+        bgcolor='silver').redim.range(
+        trend=(tr_min,tr_max))
+    + ERR_BIG_plt.opts(
+        width=600, height=400, 
+        bgcolor='silver').redim.range(
+            MoE=(ERR_min,ERR_max))
+)
 
 # %% Time series correlations to create clustered groups
 
