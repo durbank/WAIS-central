@@ -123,8 +123,6 @@ gdf_cores = gdf_cores[gdf_cores['Elev'].notna()]
 # Remove specific unwanted cores
 gdf_cores.drop('SEAT-10-4', inplace=True)
 gdf_cores.drop('BER11C95_25', inplace=True)
-
-
 gdf_cores.drop('SEAT-11-1', inplace=True)
 gdf_cores.drop('SEAT-11-2', inplace=True)
 gdf_cores.drop('SEAT-11-3', inplace=True)
@@ -428,9 +426,20 @@ coreALL_plt*Ant_bnds*rLOC_plt*coreALL_plt.opts(
     bgcolor='lightsteelblue').redim.range(
         trend=(-15,15))
 
+# %% Limit time series to those within the bounds
 
+# trace_idx = gdf_traces.within(poly_bnds)
+# gdf_traces = gdf_traces[trace_idx]
+# accum_ALL = 
+
+poly_idx = gdf_grid_ALL.within(poly_bnds)
+gdf_grid_ALL = gdf_grid_ALL[poly_idx]
+accum_grid_ALL = accum_grid_ALL[gdf_grid_ALL.index]
+std_grid_ALL = std_grid_ALL[gdf_grid_ALL.index]
+yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
 
 # %% Mean accum and trends for full time series
+
 
 gdf_grid_ALL['Duration'] = accum_grid_ALL.notna().sum()
 gdf_grid_ALL.query('Duration >= 10', inplace=True)
@@ -457,9 +466,13 @@ duration_plt = gv.Polygons(
         line_color=None, tools=['hover'])
 
 (
-    aALL_plt.opts(
+    (aALL_plt*accum_core_plt).opts(
         width=600, height=400, 
-        bgcolor='silver').redim.range(
+        bgcolor='silver', 
+        ylim=gdf_bounds['y_range'], 
+        # ylim=tuple([
+        #     num+10000 for num in gdf_bounds['y_range']]),
+        xlim=gdf_bounds['x_range']).redim.range(
         accum=(ac_min,ac_max)) 
     + duration_plt.opts(
     width=600, height=400, bgcolor='silver')
@@ -516,8 +529,10 @@ ERR_all_plt = gv.Polygons(
 
 # %% Larger grid cells and composite time series
 
+cores_accum1960 = core_ACCUM.loc[1960::]
 gdf_cores['accum'] = core_ACCUM.loc[
     1960::,gdf_cores.index].mean()
+
 
 # Combine trace time series based on grid cells
 tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
@@ -525,6 +540,14 @@ tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
     std_BIG, yr_count_BIG) = trace_combine(
     tmp_grid_big, accum_ALL, std_ALL)
 
+# Limit time series to those within the bounds
+poly_idx = gdf_BIG.intersects(poly_bnds)
+gdf_BIG = gdf_BIG[poly_idx]
+accum_BIG = accum_BIG[gdf_BIG.index]
+std_BIG = std_BIG[gdf_BIG.index]
+yr_count_BIG = yr_count_BIG[gdf_BIG.index]
+
+# Add the total duration of the time series for each grid
 gdf_BIG['Duration'] = accum_BIG.notna().sum()
 
 # Calculate trends for large grid cells
@@ -556,6 +579,11 @@ sig_plt = gv.Polygons(
         projection=ANT_proj, line_color='black', 
         line_width=2, color=None)
 
+# Radar data plot
+radar_plt = gv.Polygons(
+    gdf_grid_ALL, crs=ANT_proj).opts(
+        projection=ANT_proj, 
+        line_color=None, color='black')
 
 ERR_BIG = gdf_BIG.copy().drop(
     ['accum', 'std', 't_lb', 
@@ -573,7 +601,7 @@ ERR_BIG_plt = gv.Polygons(
     tools=['hover'])
 
 (
-    (tBIG_plt*sig_plt).opts(
+    (tBIG_plt*sig_plt*radar_plt).opts(
         width=600, height=400, 
         bgcolor='silver').redim.range(
         trend=(tr_min,tr_max))
@@ -585,19 +613,18 @@ ERR_BIG_plt = gv.Polygons(
 
 # %% Time series correlations to create clustered groups
 
-gdf_tmp = gdf_BIG.copy()
-corr_tmp = accum_BIG.copy()
-groups = []
+# gdf_tmp = gdf_BIG.copy()
+# corr_tmp = accum_BIG.copy()
+# groups = []
 
-while gdf_tmp.shape[0] > 1:
-    corr_BIG = corr_tmp.diff().corr()
-    col_idx = corr_BIG[corr_BIG > 0].sum().idxmax()
-    group_idx = corr_BIG[corr_BIG[col_idx] >= 0.50].index
-    groups.append(group_idx.values)
+# while gdf_tmp.shape[0] > 1:
+#     corr_BIG = corr_tmp.diff().corr()
+#     col_idx = corr_BIG[corr_BIG > 0].sum().idxmax()
+#     group_idx = corr_BIG[corr_BIG[col_idx] >= 0.50].index
+#     groups.append(group_idx.values)
 
-    gdf_tmp.drop(group_idx, inplace=True)
-    corr_tmp.drop(group_idx, axis=1, inplace=True)
-
+#     gdf_tmp.drop(group_idx, inplace=True)
+#     corr_tmp.drop(group_idx, axis=1, inplace=True)
 
 # %% K-means clustering to create groups
 
@@ -617,28 +644,33 @@ norm_df['North'] = (
 
 norm_df[norm_df.isna()] = 0
 
-
-# ks = range(1,11)
-# scores = []
-
-# for k in ks:
-#     model = KMeans(n_clusters=k)
-#     model.fit_predict(norm_df)
-#     scores.append(-model.score(norm_df))
-
-# plt.plot(ks, scores)
-# plt.ylabel('Total intra-cluster distance')
-# plt.xlabel('k')
-# plt.show()
-# r_state = 1
-# print(f"random seed = {r_state}")
-
 grp_pred = KMeans(
     n_clusters=4, 
+    # n_clusters=3, 
     random_state=0).fit_predict(norm_df)
 gdf_BIG['Group'] = grp_pred
 alpha_dict = {0: 'A', 1: 'B', 2: 'C', 3: 'D'}
 gdf_BIG.replace({'Group': alpha_dict}, inplace=True)
+
+# %%
+
+grp_A = [22, 23, 29, 35]
+grp_B = [27, 28, 33, 34, 39, 40]
+grp_C = [37, 38, 43, 49]
+grp_D = [19, 20, 21, 25, 26, 31, 32]
+
+gdf_BIG['Group'] = ""
+
+for i, group in enumerate(
+    [grp_A, grp_B, grp_C, grp_D]):
+
+    row_idx = gdf_BIG['grid_ID'].isin(group)
+    gdf_BIG.loc[row_idx,'Group'] = i
+
+alpha_dict = {0: 'A', 1: 'B', 2: 'C', 3: 'D'}
+gdf_BIG.replace({'Group': alpha_dict}, inplace=True)
+
+# %%
 
 poly_groups = []
 G_cmap = {'A':'#66C2A5', 'B':'#FC8D62', 'C':'#8DA0CB', 'D':'#E78AC3'}
@@ -692,10 +724,15 @@ for i, group in enumerate(
     plt.show()
 
 
+# %%
 
 gdf_groups = gpd.GeoDataFrame(
-    {'Group_ID': alpha_dict.values()}, 
+    {'Group_ID': list(alpha_dict.values())[
+        0:len(poly_groups)]}, 
     geometry=poly_groups, crs=gdf_BIG.crs)
+# gdf_groups = gpd.GeoDataFrame(
+#     {'Group_ID': alpha_dict.values()}, 
+#     geometry=poly_groups, crs=gdf_BIG.crs)
 
 bounds = {
     'x_range': tuple(gdf_BIG.total_bounds[0::2]), 
