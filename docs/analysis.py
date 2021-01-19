@@ -8,6 +8,7 @@ import pandas as pd
 import geopandas as gpd
 from pathlib import Path
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
@@ -16,6 +17,8 @@ output_notebook()
 hv.extension('bokeh')
 gv.extension('bokeh')
 from shapely.geometry import Polygon, Point
+
+# hv.archive.auto()
 
 # Set project root directory
 ROOT_DIR = Path(__file__).parents[1]
@@ -38,6 +41,13 @@ shp = str(ROOT_DIR.joinpath(
     'data/Ant_basemap/Coastline_medium_res_polygon.shp'))
 gdf_ANT = gpd.read_file(shp)
 
+
+import xarray as xr
+# Define Antarctic DEM file
+xr_DEM = xr.open_rasterio(
+    ROOT_DIR.joinpath(
+        'data/Antarctica_Cryosat2_1km_DEMv1.0.tif')).squeeze()
+
 #%% Import and format PAIPR-generated results
 
 # Import raw data
@@ -57,8 +67,9 @@ data_0 = data_raw.query(
     ['collect_time', 'Year']).reset_index(drop=True)
 
 # Format and sort results for further processing
-data_form = format_PAIPR(data_0).drop(
-    'elev', axis=1)
+# data_form = format_PAIPR(data_0).drop(
+#     'elev', axis=1)
+data_form = format_PAIPR(data_0)
 
 # Create time series arrays for annual accumulation 
 # and error
@@ -75,8 +86,8 @@ gdf_traces.to_crs(epsg=3031, inplace=True)
 # %% Import and format SAMBA cores
 
 # Import raw data
-samba_raw = pd.read_excel(
-    ROOT_DIR.joinpath("data/DGK_SMB_compilation.xlsx"), 
+samba_raw = pd.read_excel(ROOT_DIR.joinpath(
+    "data/DGK_SMB_compilation.xlsx"), 
     sheet_name='Accumulation')
 
 # Format SAMBA core data
@@ -137,7 +148,7 @@ core_ACCUM = core_ACCUM[gdf_cores.index]
 # %%
 
 # Combine trace time series based on grid cells
-tmp_grids = pts2grid(gdf_traces, resolution=1000)
+tmp_grids = pts2grid(gdf_traces, resolution=2500)
 (gdf_grid_ALL, accum_grid_ALL, 
     std_grid_ALL, yr_count_ALL) = trace_combine(
     tmp_grids, accum_ALL, std_ALL)
@@ -188,13 +199,6 @@ gdf_core['t_lb'] = lb
 gdf_core['t_ub'] = ub
 gdf_core['t_perc'] = trends / gdf_core['accum']
 
-# Determine trend significance for cores
-insig_core = gdf_core.query(
-    't_lb<0 & t_ub>0').index.values
-sig_core = np.invert(np.array(
-    [(gdf_core['t_lb'] < 0).values, 
-    (gdf_core['t_ub'] > 0).values]).all(axis=0))
-
 # %% Calculate trends using non-Bootstrapping
 
 import statsmodels.api as sm
@@ -221,7 +225,8 @@ gdf_grid['rlm_ub'] = rlm_Tub
 
 # %% Calculate trends for partial-coverage cores
 
-# Keep all core data 1979 to present
+# Keep all core data from start of
+# selected radar data to present
 cores_long = core_ACCUM.loc[yr_start:]
 gdf_long = gdf_cores
 gdf_long['accum'] = cores_long.mean()
@@ -229,7 +234,7 @@ gdf_long['accum'] = cores_long.mean()
 # Create size variable based on number of years in record
 tmp = np.invert(
     cores_long.isna()).sum()
-gdf_long['size'] = 12*tmp/tmp.max()
+gdf_long['size'] = 20*tmp/tmp.max()
 
 # Calculate trends in cores
 trends, _, lb, ub = trend_bs(cores_long, 1000)
@@ -238,11 +243,18 @@ gdf_long['t_lb'] = lb
 gdf_long['t_ub'] = ub
 gdf_long['t_perc'] = trends / gdf_long['accum']
 
+# Determine trend significance for cores
+insig_core = gdf_long.query(
+    't_lb<0 & t_ub>0').index.values
+sig_core = np.invert(np.array(
+    [(gdf_long['t_lb'] < 0).values, 
+    (gdf_long['t_ub'] > 0).values]).all(axis=0))
+
 # %% Study site inset plot
 
 gdf_bounds = {
-    'x_range': tuple(gdf_grid.total_bounds[0::2]+[-20000,30000]), 
-    'y_range': tuple(gdf_grid.total_bounds[1::2]+[-40000,15000])}
+    'x_range': tuple(gdf_grid.total_bounds[0::2]+[-25000,25000]), 
+    'y_range': tuple(gdf_grid.total_bounds[1::2]+[-30000,25000])}
 
 # Bounds of radar data
 poly_bnds = Polygon([
@@ -251,22 +263,11 @@ poly_bnds = Polygon([
     [gdf_bounds['x_range'][1], gdf_bounds['y_range'][1]], 
     [gdf_bounds['x_range'][1], gdf_bounds['y_range'][0]]
     ])
+
 radar_bnds = gv.Polygons(
     poly_bnds, crs=ANT_proj).opts(
         projection=ANT_proj, line_color='red', 
         line_width=3, color=None)
-
-# Radar data plot
-radar_plt = gv.Polygons(
-    gdf_grid, crs=ANT_proj).opts(
-        projection=ANT_proj, color='black')
-
-# Core data plot
-core_plt = gv.Points(
-    gdf_long, crs=ANT_proj, 
-    vdims=['Name']).opts(
-        projection=ANT_proj, color='blue', size=5, 
-        tools=['hover'])
 
 # Antarctica boundaries
 Ant_bnds = gv.Shape.from_shapefile(
@@ -274,10 +275,19 @@ Ant_bnds = gv.Shape.from_shapefile(
         projection=ANT_proj, color='silver')
 
 # Add plot to workspace
-# (Ant_bnds * radar_plt * core_plt).opts(
-#     width=500, height=500, bgcolor='lightsteelblue')
 (Ant_bnds * radar_bnds).opts(
-    width=500, height=500, bgcolor='lightsteelblue')
+    width=700, height=700, bgcolor='lightsteelblue')
+
+# %%
+
+# Clip elevation data to radar bounds
+xr_DEM = xr_DEM.sel(
+    x=slice(poly_bnds.bounds[0], poly_bnds.bounds[2]), 
+    y=slice(poly_bnds.bounds[3],poly_bnds.bounds[1]))
+
+# Generate elevation contours plot
+elev_plt = hv.Image(xr_DEM.values, bounds=poly_bnds.bounds)
+cont_plt = hv.operation.contours(elev_plt, levels=15)
 
 # %% Plot mean accumulation
 
@@ -308,12 +318,6 @@ count_plt = gv.Polygons(
         projection=ANT_proj, line_color=None, 
         cmap='magma', colorbar=True, 
         tools=['hover'])
-(accum_plt*accum_core_plt).opts(
-    width=600, height=400, 
-    xlim=gdf_bounds['x_range'], 
-    ylim=gdf_bounds['y_range'], 
-    bgcolor='silver').redim.range(
-    accum=(200,500))
 
 # %% Plot linear trend results
 
@@ -344,7 +348,7 @@ insig_plt = gv.Polygons(
         fill_alpha=0.75, color='grey', 
         line_color=None, tools=['hover'])
 sig_core_plt = gv.Points(
-    gdf_core[sig_core], 
+    gdf_long[sig_core], 
     vdims=['Name', 'trend', 't_lb', 't_ub'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='trend', 
@@ -352,24 +356,18 @@ sig_core_plt = gv.Points(
         colorbar=True, size=10, line_color='black', 
         marker='triangle', tools=['hover'])
 insig_core_plt = gv.Points(
-    gdf_core.loc[insig_core], 
+    gdf_long.loc[insig_core], 
     vdims=['Name', 'trend', 't_lb', 't_ub'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='grey', alpha=0.75,  
-        size=10, line_color='black', marker='triangle', tools=['hover'])
+        size=10, line_color='black', 
+        marker='triangle', tools=['hover'])
 tERR_plt = gv.Polygons(
     gdf_ERR, vdims=['MoE', 'trend'], 
     crs=ANT_proj).opts(projection=ANT_proj, 
     line_color=None, cmap='plasma', colorbar=True, 
     tools=['hover'])
-# insig_plt*sig_plt*insig_core_plt*sig_core_plt.opts(
-#     width=600, height=400, bgcolor='silver', 
-#     xlim=gdf_bounds['x_range'], 
-#     ylim=gdf_bounds['y_range']).redim.range(
-#         trend=(t_min,t_max)) + tERR_plt.opts(
-#         width=600, height=400, bgcolor='silver',
-#         xlim=gdf_bounds['x_range'], 
-#         ylim=gdf_bounds['y_range'])
+
 
 t_plt = gv.Polygons(
     data=gdf_grid, 
@@ -387,16 +385,36 @@ core_t_plt = gv.Points(
         colorbar=True, size='size', line_color='black', 
         marker='triangle', tools=['hover'])
 
-t_plt*core_t_plt.opts(
-    width=600, height=400, bgcolor='silver', 
-    xlim=gdf_bounds['x_range'], 
-    ylim=gdf_bounds['y_range']).redim.range(
-        trend=(-15,15)) + tERR_plt.opts(
-        width=600, height=400, bgcolor='silver',
+
+sig_pltALL = (
+    insig_plt*sig_plt*insig_core_plt
+    *sig_core_plt.redim.range(trend=(t_min,t_max))
+)
+
+(
+    (elev_plt.opts(cmap='dimgray')
+        # * cont_plt.opts(cmap='dimgray')
+        * t_plt*core_t_plt.redim.range(trend=(-15,15))
+    ).opts(
+        width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
-        ylim=gdf_bounds['y_range']) + count_plt.opts(
-            width=600, height=400, 
-            bgcolor='silver').redim.range(trace_count=(0,30))
+        ylim=gdf_bounds['y_range']) 
+    + (elev_plt.opts(cmap='dimgray') * tERR_plt).opts(
+        width=700, height=700, 
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
+    + (elev_plt.opts(cmap='dimgray') * sig_pltALL).opts(
+        width=700, height=700, 
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
+)
+#     + (elev_plt.opts(cmap='dimgray') 
+#         * count_plt.redim.range(trace_count=(0,30))).opts(
+#             width=600, height=400)
+# )
+
+
+
 
 # %% Trends with all cores (not all cover full time period)
 
@@ -405,6 +423,10 @@ t_plt*core_t_plt.opts(
 #     [gdf_grid.trend.max(), gdf_long.trend.max()])
 # t_min = np.min(
 #     [gdf_grid.trend.min(), gdf_long.trend.min()])
+
+core_bounds = {
+    'x_range': bbox.bounds[0::2], 
+    'y_range': bbox.bounds[1::2]}
 
 rLOC_plt = gv.Polygons(
     data=gdf_grid, crs=ANT_proj).opts(
@@ -421,10 +443,13 @@ coreALL_plt = gv.Points(
         line_color='black', 
         marker='triangle', tools=['hover'])
 
-coreALL_plt*Ant_bnds*rLOC_plt*coreALL_plt.opts(
-    width=600, height=400, 
-    bgcolor='lightsteelblue').redim.range(
-        trend=(-15,15))
+(
+    coreALL_plt*Ant_bnds*rLOC_plt*coreALL_plt.opts(
+        bgcolor='lightsteelblue').redim.range(trend=(-15,15))
+).opts(
+    xlim=core_bounds['x_range'], 
+    ylim=core_bounds['y_range'], 
+    width=700, height=700)
 
 # %% Limit time series to those within the bounds
 
@@ -440,24 +465,26 @@ yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
 
 # %% Mean accum and trends for full time series
 
-
+# Limit full time series to those with 10+ years of records
 gdf_grid_ALL['Duration'] = accum_grid_ALL.notna().sum()
 gdf_grid_ALL.query('Duration >= 10', inplace=True)
 accum_grid_ALL = accum_grid_ALL[gdf_grid_ALL.index]
 std_grid_ALL = std_grid_ALL[gdf_grid_ALL.index]
 yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
 
-
+# Calculate limits for colormap
 ac_max = np.quantile(gdf_grid_ALL.accum, 0.99)
 ac_min = np.quantile(gdf_grid_ALL.accum, 0.01)
 
-
+# Plot of mean accumulation across full time
 aALL_plt = gv.Polygons(
     gdf_grid_ALL, vdims=['accum', 'std'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='accum', 
         cmap='viridis', colorbar=True, 
         line_color=None, tools=['hover'])
+
+# Plot of time series durations
 duration_plt = gv.Polygons(
     gdf_grid_ALL, vdims=['Duration', 'trace_count'], 
     crs=ANT_proj).opts(
@@ -466,65 +493,137 @@ duration_plt = gv.Polygons(
         line_color=None, tools=['hover'])
 
 (
-    (aALL_plt*accum_core_plt).opts(
-        width=600, height=400, 
-        bgcolor='silver', 
-        ylim=gdf_bounds['y_range'], 
-        # ylim=tuple([
-        #     num+10000 for num in gdf_bounds['y_range']]),
-        xlim=gdf_bounds['x_range']).redim.range(
-        accum=(ac_min,ac_max)) 
-    + duration_plt.opts(
-    width=600, height=400, bgcolor='silver')
+    (elev_plt.opts(cmap='dimgray')
+    * (aALL_plt*accum_core_plt).redim.range(
+        accum=(ac_min,ac_max))
+    ).opts(
+        width=700, height=700,  
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
+    + (elev_plt.opts(cmap='dimgray')*duration_plt).opts(
+        width=700, height=700, 
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
 )
-# %% 
 
-# Calculate trends for full duration
-trends, _, lb, ub = trend_bs(
-    accum_grid_ALL, 1000, df_err=std_grid_ALL)
-gdf_grid_ALL['trend'] = trends
-gdf_grid_ALL['t_lb'] = lb
-gdf_grid_ALL['t_ub'] = ub
-gdf_grid_ALL['t_perc'] = trends / gdf_grid_ALL['accum']
+# %% 1979-2010 accum plot
+
+(
+    elev_plt.opts(cmap='dimgray', colorbar=False)
+    * (accum_plt*accum_core_plt).redim.range(
+        accum=(250,500))
+).opts(
+    width=700, height=700, 
+    xlim=gdf_bounds['x_range'], 
+    ylim=gdf_bounds['y_range'])
 
 # %%
 
-tr_max = np.quantile(gdf_grid_ALL.trend, 0.99)
-tr_min = np.quantile(gdf_grid_ALL.trend, 0.01)
-tALL_plt = gv.Polygons(
-    data=gdf_grid_ALL, 
-    vdims=['trend', 't_lb', 't_ub'], 
+# Calculate % change between mean accum 1979-2010 
+# and mean accum for max duration available
+ALL_subset = gdf_grid_ALL.loc[
+    gdf_grid_ALL['grid_ID'].isin(gdf_grid['grid_ID'])]
+res_accum = (ALL_subset['accum'] - gdf_grid['accum'])
+rmse_accum = np.sqrt(
+    (res_accum**2).sum() / (res_accum.count()-1))
+print(f"Mean bias between 1979-2010 mean accum and mean accum for full available duration is {res_accum.mean():.2f} mm/yr ({100*(res_accum/gdf_grid['accum']).mean():.2f}%)")
+print(f"RMSE between 1979-2010 mean accum and mean for full duration is {rmse_accum:.2f} mm/yr ({100*rmse_accum/gdf_grid['accum'].mean():.2f}%)")
+
+res_gdf = gpd.GeoDataFrame(
+    data=100*res_accum/gdf_grid.accum, 
+    geometry=ALL_subset.geometry, 
+    crs=ALL_subset.crs)
+
+res_plt = gv.Polygons(
+    data=res_gdf, vdims=['accum'], 
     crs=ANT_proj).opts(
-        projection=ANT_proj, line_color=None, 
-        cmap='coolwarm_r', symmetric=True, 
-        colorbar=True, tools=['hover'])
+        projection=ANT_proj, color='accum', 
+        cmap='PRGn', colorbar=True, symmetric=True,
+        line_color=None, tools=['hover'])
 
-
-gdf_ERR_ALL = gdf_grid_ALL.copy().drop(
-    ['accum', 'std', 't_lb', 
-    't_ub', 't_perc'], axis=1)
-gdf_ERR_ALL['MoE'] = (
-    gdf_grid_ALL['t_ub'] 
-    - gdf_grid_ALL['t_lb']) / 2
-ERR_max = np.quantile(gdf_ERR_ALL.MoE, 0.99)
-ERR_min = np.quantile(gdf_ERR_ALL.MoE, 0.01)
-
-ERR_all_plt = gv.Polygons(
-    gdf_ERR_ALL, vdims=['MoE', 'trend'], 
-    crs=ANT_proj).opts(projection=ANT_proj, 
-    line_color=None, cmap='plasma', colorbar=True, 
-    tools=['hover'])
+res_min = np.quantile(res_gdf.accum, 0.01)
+res_max = np.quantile(res_gdf.accum, 0.99)
 
 (
-    tALL_plt.opts(
-        width=600, height=400, 
-        bgcolor='silver').redim.range(
-        trend=(tr_min,tr_max))
-    + ERR_all_plt.opts(
-        width=600, height=400, 
-        bgcolor='silver').redim.range(
-            MoE=(ERR_min,ERR_max))
-)
+    elev_plt.opts(cmap='dimgray', colorbar=False)
+    * res_plt.redim.range(accum=(res_min,res_max))
+    ).opts(
+        width=700, height=700,  
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
+
+# %% Data location map
+
+# Radar location plot
+radar_plt = gv.Polygons(
+    gdf_grid_ALL, crs=ANT_proj).opts(
+        projection=ANT_proj, color='red', line_color=None)
+
+# Core location plot
+core_plt = gv.Points(
+    gdf_long, crs=ANT_proj, 
+    vdims=['Name']).opts(
+        projection=ANT_proj, color='blue', size=15, 
+        line_color='black', marker='triangle', 
+        tools=['hover'])
+
+# Add to workspace
+(
+    elev_plt.opts(cmap='dimgray', colorbar=True) 
+    * radar_plt * core_plt
+    ).opts(
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'], 
+        width=700, height=700)
+
+# %% 
+
+# # Calculate trends for full duration
+# trends, _, lb, ub = trend_bs(
+#     accum_grid_ALL, 1000, df_err=std_grid_ALL)
+# gdf_grid_ALL['trend'] = trends
+# gdf_grid_ALL['t_lb'] = lb
+# gdf_grid_ALL['t_ub'] = ub
+# gdf_grid_ALL['t_perc'] = trends / gdf_grid_ALL['accum']
+
+# %%
+
+# tr_max = np.quantile(gdf_grid_ALL.trend, 0.99)
+# tr_min = np.quantile(gdf_grid_ALL.trend, 0.01)
+# tALL_plt = gv.Polygons(
+#     data=gdf_grid_ALL, 
+#     vdims=['trend', 't_lb', 't_ub'], 
+#     crs=ANT_proj).opts(
+#         projection=ANT_proj, line_color=None, 
+#         cmap='coolwarm_r', symmetric=True, 
+#         colorbar=True, tools=['hover'])
+
+
+# gdf_ERR_ALL = gdf_grid_ALL.copy().drop(
+#     ['accum', 'std', 't_lb', 
+#     't_ub', 't_perc'], axis=1)
+# gdf_ERR_ALL['MoE'] = (
+#     gdf_grid_ALL['t_ub'] 
+#     - gdf_grid_ALL['t_lb']) / 2
+# ERR_max = np.quantile(gdf_ERR_ALL.MoE, 0.99)
+# ERR_min = np.quantile(gdf_ERR_ALL.MoE, 0.01)
+
+# ERR_all_plt = gv.Polygons(
+#     gdf_ERR_ALL, vdims=['MoE', 'trend'], 
+#     crs=ANT_proj).opts(projection=ANT_proj, 
+#     line_color=None, cmap='plasma', colorbar=True, 
+#     tools=['hover'])
+
+# (
+#     tALL_plt.opts(
+#         width=600, height=400, 
+#         bgcolor='silver').redim.range(
+#         trend=(tr_min,tr_max))
+#     + ERR_all_plt.opts(
+#         width=600, height=400, 
+#         bgcolor='silver').redim.range(
+#             MoE=(ERR_min,ERR_max))
+# )
 
 
 # %% Larger grid cells and composite time series
@@ -560,8 +659,11 @@ gdf_BIG['t_perc'] = trends / gdf_BIG['accum']
 
 # %%
 
+# Set colormap limits for trends
 tr_max = np.quantile(gdf_BIG.trend, 0.99)
 tr_min = np.quantile(gdf_BIG.trend, 0.01)
+
+# Trend map for big grids
 tBIG_plt = gv.Polygons(
     data=gdf_BIG, 
     vdims=['trend', 't_lb', 't_ub'], 
@@ -570,9 +672,12 @@ tBIG_plt = gv.Polygons(
         cmap='coolwarm_r', symmetric=True, 
         colorbar=True, tools=['hover'])
 
+# Calculate trend significance for big grids
 sig_BIG = np.invert(np.array(
     [(gdf_BIG['t_lb'] < 0).values, 
     (gdf_BIG['t_ub'] > 0).values]).all(axis=0))
+
+# Generate polygons for signficant trends
 sig_plt = gv.Polygons(
     data=gdf_BIG[sig_BIG], 
     crs=ANT_proj).opts(
@@ -585,6 +690,7 @@ radar_plt = gv.Polygons(
         projection=ANT_proj, 
         line_color=None, color='black')
 
+# Calculate colormap limits for trend margin of error
 ERR_BIG = gdf_BIG.copy().drop(
     ['accum', 'std', 't_lb', 
     't_ub', 't_perc'], axis=1)
@@ -594,6 +700,7 @@ ERR_BIG['MoE'] = (
 ERR_max = np.quantile(ERR_BIG.MoE, 0.99)
 ERR_min = np.quantile(ERR_BIG.MoE, 0.01)
 
+# Margin of error on trends plot
 ERR_BIG_plt = gv.Polygons(
     ERR_BIG, vdims=['MoE', 'trend'], 
     crs=ANT_proj).opts(projection=ANT_proj, 
@@ -602,13 +709,11 @@ ERR_BIG_plt = gv.Polygons(
 
 (
     (tBIG_plt*sig_plt*radar_plt).opts(
-        width=600, height=400, 
+        width=700, height=700, 
         bgcolor='silver').redim.range(
         trend=(tr_min,tr_max))
-    + ERR_BIG_plt.opts(
-        width=600, height=400, 
-        bgcolor='silver').redim.range(
-            MoE=(ERR_min,ERR_max))
+    + (ERR_BIG_plt.redim.range(MoE=(ERR_min,ERR_max))
+        * radar_plt).opts(width=700, height=700, bgcolor='silver')
 )
 
 # %% Time series correlations to create clustered groups
@@ -672,8 +777,68 @@ gdf_BIG.replace({'Group': alpha_dict}, inplace=True)
 
 # %%
 
+# poly_groups = []
+# G_cmap = {'A':'#66C2A5', 'B':'#FC8D62', 'C':'#8DA0CB', 'D':'#E78AC3'}
+
+# for i, group in enumerate(
+#     gdf_BIG.groupby('Group').groups):
+
+#     # Subset data based on group identity
+#     gdf_group = gdf_BIG[gdf_BIG['Group'] == group]
+#     accum_group = accum_BIG[gdf_group.index]
+#     count_group = yr_count_BIG[gdf_group.index]
+    
+#     # Merge group into single polygon
+#     poly = gdf_group.geometry.unary_union
+#     poly_groups.append(poly)
+
+#     # Build composite core from all cores withing poly
+#     cores_group = gdf_cores[
+#         gdf_cores.geometry.within(poly)]
+#     cores_Gaccum = core_ACCUM[cores_group.index].loc[
+#             accum_group.index[0]:]
+#     core_comp = cores_Gaccum.mean(axis=1)
+#     core_count = cores_Gaccum.notna().sum(axis=1)
+    
+#     fig, (ax1, ax2) = plt.subplots(2, 1)
+#     fig.suptitle(
+#         'Grid Group '+alpha_dict[i]+' time series')
+#     accum_group.plot(ax=ax1, color=G_cmap[group], 
+#     label='_hidden_')
+#     core_comp.plot(
+#         ax=ax1, color='grey', linewidth=2, 
+#         linestyle='--')
+#     count_group.plot(ax=ax2, color=G_cmap[group])
+#     ax1.get_legend().remove()
+#     ax1.set_xlim(
+#         [accum_BIG.index[0], 
+#         accum_BIG.index[-1]])
+#     ax1.set_ylabel('SMB (mm/a)')
+#     ax2.get_legend().remove()
+#     ax2.set_xlim(
+#         [accum_BIG.index[0], 
+#         accum_BIG.index[-1]])
+#     ax2.set_ylabel('# traces')
+
+#     if core_count.sum():
+#         ax3=ax2.twinx()
+#         core_count.plot(
+#             ax=ax3, color='grey', linewidth=2, 
+#             linestyle='--')
+#         ax3.set_ylabel('# Cores')
+#     plt.show()
+
+# %%
+
 poly_groups = []
-G_cmap = {'A':'#66C2A5', 'B':'#FC8D62', 'C':'#8DA0CB', 'D':'#E78AC3'}
+G_cmap = {
+    'A':'#66C2A5', 'B':'#FC8D62', 
+    'C':'#8DA0CB', 'D':'#E78AC3'}
+
+
+fig = plt.figure(figsize=(13, 10))
+outer = gridspec.GridSpec(
+    2, 2, wspace=0.4, hspace=0.3)
 
 for i, group in enumerate(
     gdf_BIG.groupby('Group').groups):
@@ -687,7 +852,7 @@ for i, group in enumerate(
     poly = gdf_group.geometry.unary_union
     poly_groups.append(poly)
 
-    # Build composite core from all cores withing poly
+    # Build composite core from all cores within poly
     cores_group = gdf_cores[
         gdf_cores.geometry.within(poly)]
     cores_Gaccum = core_ACCUM[cores_group.index].loc[
@@ -695,9 +860,18 @@ for i, group in enumerate(
     core_comp = cores_Gaccum.mean(axis=1)
     core_count = cores_Gaccum.notna().sum(axis=1)
     
-    fig, (ax1, ax2) = plt.subplots(2, 1)
-    fig.suptitle(
+
+    inner = gridspec.GridSpecFromSubplotSpec(
+        2, 1,subplot_spec=outer[i], 
+        wspace=0.2, hspace=0.25)
+    ax1 = plt.Subplot(fig, inner[0])
+    ax2 = plt.Subplot(fig, inner[1])
+    ax1.set_title(
         'Grid Group '+alpha_dict[i]+' time series')
+
+    # fig.suptitle(
+    #     'Grid Group '+alpha_dict[i]+' time series')
+
     accum_group.plot(ax=ax1, color=G_cmap[group], 
     label='_hidden_')
     core_comp.plot(
@@ -708,6 +882,7 @@ for i, group in enumerate(
     ax1.set_xlim(
         [accum_BIG.index[0], 
         accum_BIG.index[-1]])
+    ax1.set_xlabel(None)
     ax1.set_ylabel('SMB (mm/a)')
     ax2.get_legend().remove()
     ax2.set_xlim(
@@ -715,15 +890,19 @@ for i, group in enumerate(
         accum_BIG.index[-1]])
     ax2.set_ylabel('# traces')
 
+    fig.add_subplot(ax1)
+    fig.add_subplot(ax2)
+
     if core_count.sum():
         ax3=ax2.twinx()
         core_count.plot(
             ax=ax3, color='grey', linewidth=2, 
             linestyle='--')
         ax3.set_ylabel('# Cores')
-    plt.show()
+        fig.add_subplot(ax3)
 
-
+fig.show()
+# fig.savefig('Figuresbig-ts.pdf', bbox_inches='tight')
 # %%
 
 gdf_groups = gpd.GeoDataFrame(
@@ -743,8 +922,15 @@ group_plt = gv.Polygons(
     gdf_groups, vdims='Group_ID', 
     crs=ANT_proj).opts(
         projection=ANT_proj, line_color=None, 
-        color_index='Group_ID', cmap=G_cmap, tools=['hover'], 
-        fill_alpha=0.5)
+        color_index='Group_ID', cmap=G_cmap, 
+        tools=['hover'], fill_alpha=0.5)
+grp_labs = hv.Labels(
+    {('x', 'y'): np.array(
+        [gdf_groups.geometry.centroid.x.values, 
+        gdf_groups.geometry.centroid.y.values]).T, 
+    'text': ['A', 'B', 'C', 'D']}, 
+    ['x', 'y'], 'text').opts(
+        text_font_size='22pt', text_color='red')
 
 # Big grid cell plot
 grid_plt = gv.Polygons(
@@ -758,19 +944,22 @@ grid_plt = gv.Polygons(
 radar_plt = gv.Polygons(
     gdf_grid_ALL, crs=ANT_proj).opts(
         projection=ANT_proj, 
-        line_color=None, color='red')
+        line_color=None, color='black')
 
 # Core data plot
 core_plt = gv.Points(
     gdf_cores, crs=ANT_proj, 
-    vdims=['Name']).opts(
+    vdims=['Name', 'size']).opts(
         projection=ANT_proj, color='blue', 
         line_color='black', marker='triangle', 
-        size=7, tools=['hover'])
+        size='size', tools=['hover'])
 
 # Add plot to workspace
-(group_plt * grid_plt * radar_plt * core_plt).opts(
-    width=700, height=450, xlim=bounds['x_range'], 
-    ylim=bounds['y_range'], bgcolor='silver')
+(
+    group_plt * grid_plt * radar_plt 
+    * grp_labs * core_plt).opts(
+        width=700, height=700, 
+        xlim=bounds['x_range'], 
+        ylim=bounds['y_range'], bgcolor='silver')
 
 # %%
