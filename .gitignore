@@ -188,3 +188,6 @@ data/*
 
 # Ignore tmp Python and Jupyter notebooks
 *.ipynb
+
+# Ignore the docs/Figures/ directory contents
+docs/Figures/*
