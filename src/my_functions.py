@@ -176,7 +176,7 @@ def pts2grid(geo_df, resolution=5000):
     geo_sjoin = gpd.sjoin(
         geo_df, geo_cells, how='inner', op='within')
     gdf_grid = gpd.GeoDataFrame(
-        data=geo_sjoin[['trace_ID', 'accum', 'std', 'index_right']], 
+        data=geo_sjoin[['trace_ID', 'elev', 'accum', 'std', 'index_right']], 
         geometry=geo_cells.geometry[geo_sjoin['index_right']].values, 
         crs=geo_df.crs)
     
@@ -202,8 +202,8 @@ def trace_combine(gdf_grid, accum_ALL, std_ALL):
         index=accum_ALL.index)
     grid_final = gpd.GeoDataFrame(
         columns=[
-            'grid_ID', 'trace_count', 'accum', 
-            'std', 'geometry'], 
+            'grid_ID', 'elev', 'trace_count', 
+            'accum', 'std', 'geometry'], 
         index=np.arange(len(grid_pop)), crs=gdf_grid.crs)
     
 
@@ -241,6 +241,7 @@ def trace_combine(gdf_grid, accum_ALL, std_ALL):
 
         # Populate return geodf
         grid_final.loc[i,'grid_ID'] = grid_idx
+        grid_final.loc[i,'elev'] = gdf_tmp['elev'].mean()
         grid_final.loc[i, 'trace_count'] = len(t_IDs)
         grid_final.loc[i,'accum'] = accum_w.mean()
         grid_final.loc[i,'std'] = np.sqrt((std_w**2).mean())
