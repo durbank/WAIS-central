@@ -150,7 +150,7 @@ core_ACCUM = core_ACCUM[gdf_cores.index]
 # Combine trace time series based on grid cells
 tmp_grids = pts2grid(gdf_traces, resolution=2500)
 (gdf_grid_ALL, accum_grid_ALL, 
-    std_grid_ALL, yr_count_ALL) = trace_combine(
+    MoE_grid_ALL, yr_count_ALL) = trace_combine(
     tmp_grids, accum_ALL, std_ALL)
 
 # Subset results to period 1979-2010
@@ -159,10 +159,10 @@ yr_end = 2009
 keep_idx = np.invert(
     accum_grid_ALL.loc[yr_start:yr_end,:].isnull().any())
 accum_grid = accum_grid_ALL.loc[yr_start:yr_end,keep_idx]
-std_grid = std_grid_ALL.loc[yr_start:yr_end,keep_idx]
+MoE_grid = MoE_grid_ALL.loc[yr_start:yr_end,keep_idx]
 gdf_grid = gdf_grid_ALL[keep_idx]
 gdf_grid['accum'] = accum_grid.mean()
-gdf_grid['std'] = np.sqrt((std_grid**2).mean())
+gdf_grid['MoE'] = MoE_grid.mean()
 
 # Subset cores to same time period
 keep_idx = np.invert(
@@ -175,7 +175,7 @@ gdf_core['accum'] = accum_core.mean()
 
 # Calculate trends in radar
 trends, _, lb, ub = trend_bs(
-    accum_grid, 1000, df_err=std_grid)
+    accum_grid, 1000, df_err=MoE_grid)
 gdf_grid['trend'] = trends
 gdf_grid['t_lb'] = lb
 gdf_grid['t_ub'] = ub
@@ -300,7 +300,7 @@ ac_min = gdf_grid.accum.min()
 
 accum_plt = gv.Polygons(
     gdf_grid, 
-    vdims=['accum', 'std'], 
+    vdims=['accum', 'MoE'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, line_color=None, 
         cmap='viridis', colorbar=True, 
@@ -327,9 +327,9 @@ t_min = np.min(
     [gdf_grid.trend.min(), gdf_core.trend.min()])
 
 gdf_ERR = gdf_grid.copy().drop(
-    ['accum', 'std', 't_lb', 
+    ['accum', 'MoE', 't_lb', 
     't_ub', 't_perc'], axis=1)
-gdf_ERR['MoE'] = (
+gdf_ERR['t_MoE'] = (
     gdf_grid['t_ub'] 
     - gdf_grid['t_lb']) / 2
 
@@ -349,21 +349,21 @@ insig_plt = gv.Polygons(
         line_color=None, tools=['hover'])
 sig_core_plt = gv.Points(
     gdf_long[sig_core], 
-    vdims=['Name', 'trend', 't_lb', 't_ub'], 
+    vdims=['Name', 'trend', 't_lb', 't_ub', 'size'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='trend', 
         cmap='coolwarm_r', symmetric=True, 
-        colorbar=True, size=10, line_color='black', 
+        colorbar=True, size='size', line_color='black', 
         marker='triangle', tools=['hover'])
 insig_core_plt = gv.Points(
     gdf_long.loc[insig_core], 
-    vdims=['Name', 'trend', 't_lb', 't_ub'], 
+    vdims=['Name', 'trend', 't_lb', 't_ub', 'size'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='grey', alpha=0.75,  
-        size=10, line_color='black', 
+        size='size', line_color='black', 
         marker='triangle', tools=['hover'])
 tERR_plt = gv.Polygons(
-    gdf_ERR, vdims=['MoE', 'trend'], 
+    gdf_ERR, vdims=['t_MoE', 'trend'], 
     crs=ANT_proj).opts(projection=ANT_proj, 
     line_color=None, cmap='plasma', colorbar=True, 
     tools=['hover'])
@@ -460,7 +460,7 @@ coreALL_plt = gv.Points(
 poly_idx = gdf_grid_ALL.within(poly_bnds)
 gdf_grid_ALL = gdf_grid_ALL[poly_idx]
 accum_grid_ALL = accum_grid_ALL[gdf_grid_ALL.index]
-std_grid_ALL = std_grid_ALL[gdf_grid_ALL.index]
+MoE_grid_ALL = MoE_grid_ALL[gdf_grid_ALL.index]
 yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
 
 # %% Mean accum and trends for full time series
@@ -469,7 +469,7 @@ yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
 gdf_grid_ALL['Duration'] = accum_grid_ALL.notna().sum()
 gdf_grid_ALL.query('Duration >= 10', inplace=True)
 accum_grid_ALL = accum_grid_ALL[gdf_grid_ALL.index]
-std_grid_ALL = std_grid_ALL[gdf_grid_ALL.index]
+MoE_grid_ALL = MoE_grid_ALL[gdf_grid_ALL.index]
 yr_count_ALL = yr_count_ALL[gdf_grid_ALL.index]
 
 # Calculate limits for colormap
@@ -478,7 +478,7 @@ ac_min = np.quantile(gdf_grid_ALL.accum, 0.01)
 
 # Plot of mean accumulation across full time
 aALL_plt = gv.Polygons(
-    gdf_grid_ALL, vdims=['accum', 'std'], 
+    gdf_grid_ALL, vdims=['accum', 'MoE'], 
     crs=ANT_proj).opts(
         projection=ANT_proj, color='accum', 
         cmap='viridis', colorbar=True, 
@@ -636,14 +636,14 @@ gdf_cores['accum'] = core_ACCUM.loc[
 # Combine trace time series based on grid cells
 tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
 (gdf_BIG, accum_BIG, 
-    std_BIG, yr_count_BIG) = trace_combine(
+    MoE_BIG, yr_count_BIG) = trace_combine(
     tmp_grid_big, accum_ALL, std_ALL)
 
 # Limit time series to those within the bounds
 poly_idx = gdf_BIG.intersects(poly_bnds)
 gdf_BIG = gdf_BIG[poly_idx]
 accum_BIG = accum_BIG[gdf_BIG.index]
-std_BIG = std_BIG[gdf_BIG.index]
+MoE_BIG = MoE_BIG[gdf_BIG.index]
 yr_count_BIG = yr_count_BIG[gdf_BIG.index]
 
 # Add the total duration of the time series for each grid
@@ -651,7 +651,7 @@ gdf_BIG['Duration'] = accum_BIG.notna().sum()
 
 # Calculate trends for large grid cells
 trends, _, lb, ub = trend_bs(
-    accum_BIG, 1000, df_err=std_BIG)
+    accum_BIG, 1000, df_err=MoE_BIG)
 gdf_BIG['trend'] = trends
 gdf_BIG['t_lb'] = lb
 gdf_BIG['t_ub'] = ub
@@ -692,17 +692,17 @@ radar_plt = gv.Polygons(
 
 # Calculate colormap limits for trend margin of error
 ERR_BIG = gdf_BIG.copy().drop(
-    ['accum', 'std', 't_lb', 
+    ['accum', 'MoE', 't_lb', 
     't_ub', 't_perc'], axis=1)
-ERR_BIG['MoE'] = (
+ERR_BIG['t_MoE'] = (
     gdf_BIG['t_ub'] 
     - gdf_BIG['t_lb']) / 2
-ERR_max = np.quantile(ERR_BIG.MoE, 0.99)
-ERR_min = np.quantile(ERR_BIG.MoE, 0.01)
+ERR_max = np.quantile(ERR_BIG.t_MoE, 0.99)
+ERR_min = np.quantile(ERR_BIG.t_MoE, 0.01)
 
 # Margin of error on trends plot
 ERR_BIG_plt = gv.Polygons(
-    ERR_BIG, vdims=['MoE', 'trend'], 
+    ERR_BIG, vdims=['t_MoE', 'trend'], 
     crs=ANT_proj).opts(projection=ANT_proj, 
     line_color=None, cmap='plasma', colorbar=True, 
     tools=['hover'])
