@@ -128,7 +128,7 @@ Ant_bnds = gv.Shape.from_shapefile(
 flight_plt = gv.Path(
     ant_flights, crs=ANT_proj).opts(
         projection=ANT_proj, 
-        alpha=0.2, color='black', line_width=2.5)
+        alpha=0.33, color='red', line_width=2.5)
 cores_plt = gv.Points(
     data=core_locs[core_locs['Duration'] >= 20], 
     vdims=['Name'], crs=ANT_proj).opts(
@@ -137,7 +137,7 @@ cores_plt = gv.Points(
 ant2k_plt = gv.Points(
     data=ant2k_locs, vdims=['Site'], 
     crs=ANT_proj).opts(
-        projection=ANT_proj, color='red', size=10, 
+        projection=ANT_proj, color='blue', size=10, 
         tools=['hover'])
 
 Ant_bnds * flight_plt * cores_plt * ant2k_plt
