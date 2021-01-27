@@ -106,13 +106,23 @@ accum_bar = np.mean(
     axis=0)
 res2011_perc = res_2011 / accum_bar
 
-sns.kdeplot(res2011_perc.reshape(res_2011.size))
+fig, ax = plt.subplots()
+ax = sns.kdeplot(
+    res_2011.reshape(res_2011.size), color='blue')
+fig.show()
 
 print(
     f"The mean bias between manually-traced and "
     f"PAIPR-derived accumulation for 2011 is "
-    f"{res2011_perc.mean()*100:.2f}% "
+    f"{res_2011.mean():.2f} mm/yr ("
+    f"{res2011_perc.mean()*100:.2f}% of the mean accumulation) "
     f"with a RMSE of {res2011_perc.std()*100:.2f}%"
+)
+print(
+    f"The mean annual accumulation for 2011 results are "
+    f"{Maccum_2011.values.mean():.0f} mm/yr for PAIPR " 
+    f"and {man2011_accum.values.mean():.0f} mm\yr "
+    f"for manual results."
 )
 print(
     f"The mean standard deviations of the annual "
@@ -122,9 +132,28 @@ print(
     f"for 2011 PAIPR layers."
 )
 
+#%%
+
+import statsmodels.api as sm
+
+a2011_1D = Maccum_2011.values.reshape(Maccum_2011.size)
+q_M11 = np.quantile(
+    (a2011_1D-a2011_1D.mean())/a2011_1D.std(), 
+    np.arange(0,1,0.01))
+man_1D = man2011_accum.values.reshape(man2011_accum.size)
+q_man = np.quantile(
+    (man_1D-man_1D.mean())/man_1D.std(), 
+    np.arange(0,1,0.01))
+
+plt.scatter(q_M11, q_man, color='blue')
+plt.plot(
+    [q_man.min(), q_man.max()], [q_man.min(), q_man.max()],
+    color='red')
+
+
 # %%
 
-def plot_TScomp(ts_df1, ts_df2, gdf_combo, labels):
+def plot_TScomp(ts_df1, ts_df2, gdf_combo, labels, colors=['blue', 'red']):
     """
     Stuff.
     """
@@ -139,23 +168,23 @@ def plot_TScomp(ts_df1, ts_df2, gdf_combo, labels):
         df2 = ts_df2.iloc[:,idx]
         fig, ax = plt.subplots()
     
-        df1.mean(axis=1).plot(ax=ax, color='red', 
+        df1.mean(axis=1).plot(ax=ax, color=colors[0], 
             linewidth=2, label=labels[0])
         (df1.mean(axis=1)+df1.std(axis=1)).plot(
-            ax=ax, color='red', linestyle='--', 
+            ax=ax, color=colors[0], linestyle='--', 
             label='__nolegend__')
         (df1.mean(axis=1)-df1.std(axis=1)).plot(
-            ax=ax, color='red', linestyle='--', 
+            ax=ax, color=colors[0], linestyle='--', 
             label='__nolegend__')
 
         df2.mean(axis=1).plot(
-            ax=ax, color='blue', linewidth=2, 
+            ax=ax, color=colors[1], linewidth=2, 
             label=labels[1])
         (df2.mean(axis=1)+df2.std(axis=1)).plot(
-            ax=ax, color='blue', linestyle='--', 
+            ax=ax, color=colors[1], linestyle='--', 
             label='__nolegend__')
         (df2.mean(axis=1)-df2.std(axis=1)).plot(
-            ax=ax, color='blue', linestyle='--', 
+            ax=ax, color=colors[1], linestyle='--', 
             label='__nolegend__')
         ax.legend()
         fig.suptitle(site+' time series')
@@ -209,6 +238,18 @@ high_idx = ((
         crs="EPSG:3031")
     .distance(gdf_traces2011.reset_index())) <= 30000).values
 
+mid_idx = ((
+    gpd.GeoSeries(gpd.points_from_xy(
+        np.repeat(
+            chunk_centers.geometry.x[5], 
+            gdf_traces2011.shape[0]), 
+        np.repeat(
+            chunk_centers.geometry.y[5], 
+            gdf_traces2011.shape[0])), 
+        crs="EPSG:3031")
+    .distance(
+        gdf_traces2011.reset_index())) <= 30000).values
+
 gdf_traces2011['Site'] = np.repeat(
     'Null', gdf_traces2011.shape[0])
 gdf_traces2011['Site'][PIG_idx] = 'PIG'
@@ -216,6 +257,7 @@ gdf_traces2011['Site'][SEAT6_idx] = 'SEAT2010-6'
 gdf_traces2011['Site'][SEAT5_idx] = 'SEAT2010-5'
 gdf_traces2011['Site'][SEAT4_idx] = 'SEAT2010-4'
 gdf_traces2011['Site'][high_idx] = 'high-accum'
+gdf_traces2011['Site'][mid_idx] = 'mid-accum'
 
 plot_TScomp(
     Maccum_2011, man2011_accum, gdf_traces2011, 
@@ -348,10 +390,15 @@ sns.kdeplot(res2016_perc.reshape(res_2016.size))
 print(
     f"The mean bias between manually-traced and "
     f"PAIPR-derived accumulation for 2016 is "
-    f"{res2016_perc.mean()*100:.2f}% "
-    f"with a RMSE of {res2016_perc.std()*100:.2f}% "
-    f"and a RMSE in mean accumulation of "
-    f"{res2016_perc.mean(axis=0).std()*100:.2f}%"
+    f"{res_2016.mean():.2f} mm/yr ("
+    f"{res2016_perc.mean()*100:.2f}% of mean accum) "
+    f"with a RMSE of {res2016_perc.std()*100:.2f}%."
+)
+print(
+    f"The mean annual accumulation for 2016 results are "
+    f"{Maccum_2016.values.mean():.0f} mm/yr for PAIPR " 
+    f"and {man2016_accum.values.mean():.0f} mm\yr "
+    f"for manual results."
 )
 print(
     f"The mean standard deviations of the annual "
@@ -484,12 +531,15 @@ man_res_perc = man_res / accum_bar
 sns.kdeplot(man_res_perc.reshape(man_res.size))
 
 print(
-    f"The mean bias in manually-derived annual accumulation "
-    f"for 2016 vs. 2011 flights is "
-    f"{man_res_perc.mean()*100:.2f}% "
-    f"with a RMSE of {man_res_perc.std()*100:.2f}% "
-    f"and a RMSE in mean accumulation of "
-    f"{man_res_perc.mean(axis=0).std()*100:.2f}%"
+    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
+    f"{man_res.mean():.1f} mm/yr ("
+    f"{man_res_perc.mean()*100:.2f}% of mean accum) "
+    f"with a RMSE of {man_res_perc.std()*100:.2f}%."
+)
+print(
+    f"The mean annual accumulation for manual results are "
+    f"{accum_man2011.values.mean():.0f} mm/yr for 2011 " 
+    f"and {accum_man2016.values.mean():.0f} mm/yr for 2016"
 )
 print(
     f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
@@ -736,8 +786,14 @@ sns.kdeplot(resPAIPR_perc.reshape(res_PAIPR.size))
 print(
     f"The mean bias between PAIPR-derived results "
     f"between 2016 and 2011 flights is "
-    f"{resPAIPR_perc.mean()*100:.2f}% "
-    f"with a RMSE of {resPAIPR_perc.std()*100:.2f}%"
+    f"{res_PAIPR.mean():.1f} mm/yr ("
+    f"{resPAIPR_perc.mean()*100:.2f}% of mean accum) "
+    f"with a RMSE of {resPAIPR_perc.std()*100:.2f}%."
+)
+print(
+    f"The mean annual accumulation for PAIPR results are "
+    f"{accum_2011.values.mean():.0f} mm/yr for 2011 " 
+    f"and {accum_2016.values.mean():.0f} mm/yr for 2016"
 )
 print(
     f"The mean standard deviations of the annual "
@@ -777,6 +833,40 @@ for i, idx in enumerate(plt_idxs):
     ax.legend()
     fig.suptitle('PAIPR time series Example '+(str(i+1)))
     fig.show()
+
+# %%
+
+# Create dataframes for scatter plots
+accum_df = pd.DataFrame(
+    {'tmp_ID': np.tile(
+        np.arange(0,accum_2011.shape[1]), 
+        accum_2011.shape[0]), 
+    'Year': np.reshape(
+        np.repeat(accum_2011.index, accum_2011.shape[1]), 
+        accum_2011.size), 
+    'accum_2011': 
+        np.reshape(
+            accum_2011.values, accum_2011.size), 
+    'std_2011': np.reshape(
+        std_2011.values, std_2011.size), 
+    'accum_2016': np.reshape(
+        accum_2016.values, accum_2016.size), 
+    'std_2016': np.reshape(
+        std_2016.values, std_2016.size)})
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+scatt_yr = hv.Points(
+    data=accum_df, 
+    kdims=['accum_2011', 'accum_2016'], 
+    vdims=['Year']).groupby('Year')
+(
+    one_to_one.opts(color='black') 
+    * scatt_yr.opts(
+        xlim=(100,750), ylim=(100,750), 
+        xlabel='2011 flight (mm/yr)', 
+        ylabel='2016 flight (mm/yr)'))
 
 # %%
 
