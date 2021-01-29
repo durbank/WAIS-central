@@ -147,13 +147,15 @@ q_man = np.quantile(
 
 plt.scatter(q_M11, q_man, color='blue')
 plt.plot(
-    [q_man.min(), q_man.max()], [q_man.min(), q_man.max()],
-    color='red')
+    [q_man.min(), q_man.max()], 
+    [q_man.min(), q_man.max()], color='red')
 
 
 # %%
 
-def plot_TScomp(ts_df1, ts_df2, gdf_combo, labels, colors=['blue', 'red']):
+def plot_TScomp(
+    ts_df1, ts_df2, gdf_combo, labels, 
+    colors=['blue', 'red']):
     """
     Stuff.
     """
@@ -699,51 +701,19 @@ gdf_2016.to_crs(epsg=3031, inplace=True)
 
 # %%
 
-trend_2011, _, lb_2011, ub_2011 = trend_bs(
-    a2011_ALL, 1000, df_err=std2011_ALL)
-gdf_2011['accum'] = a2011_ALL.mean().values
-gdf_2011['trend'] = trend_2011 / gdf_2011['accum']
-gdf_2011['t_lb'] = lb_2011 / gdf_2011['accum']
-gdf_2011['t_ub'] = ub_2011 / gdf_2011['accum']
+# trend_2011, _, lb_2011, ub_2011 = trend_bs(
+#     a2011_ALL, 1000, df_err=std2011_ALL)
+# gdf_2011['accum'] = a2011_ALL.mean().values
+# gdf_2011['trend'] = trend_2011 / gdf_2011['accum']
+# gdf_2011['t_lb'] = lb_2011 / gdf_2011['accum']
+# gdf_2011['t_ub'] = ub_2011 / gdf_2011['accum']
 
-trend_2016, _, lb_2016, ub_2016 = trend_bs(
-    a2016_ALL, 1000, df_err=std2016_ALL)
-gdf_2016['accum'] = a2016_ALL.mean().values
-gdf_2016['trend'] = trend_2016 / gdf_2016['accum']
-gdf_2016['t_lb'] = lb_2016 / gdf_2016['accum']
-gdf_2016['t_ub'] = ub_2016 / gdf_2016['accum']
-
-#%%
-plt_accum2011 = gv.Points(
-    gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
-        projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, 
-        bgcolor='silver', tools=['hover'], 
-        width=600, height=400)
-plt_accum2016 = gv.Points(
-    gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
-        projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, 
-        bgcolor='silver', tools=['hover'], 
-        width=600, height=400)
-plt_accum2011 + plt_accum2016
-
-# %%
-plt_trend2011 = gv.Points(
-    gdf_2011, crs=ANT_proj, 
-    vdims=['trend','t_lb','t_ub']).opts(
-        projection=ANT_proj, color='trend', 
-        cmap='coolwarm_r', symmetric = True, 
-        colorbar=True, bgcolor='silver', 
-        tools=['hover'], width=600, height=400)
-plt_trend2016 = gv.Points(
-    gdf_2016, crs=ANT_proj, 
-    vdims=['trend','t_lb','t_ub']).opts(
-        projection=ANT_proj, color='trend', 
-        cmap='coolwarm_r', colorbar=True, 
-        symmetric=True, bgcolor='silver', 
-        tools=['hover'], width=600, height=400)
-plt_trend2011 + plt_trend2016
+# trend_2016, _, lb_2016, ub_2016 = trend_bs(
+#     a2016_ALL, 1000, df_err=std2016_ALL)
+# gdf_2016['accum'] = a2016_ALL.mean().values
+# gdf_2016['trend'] = trend_2016 / gdf_2016['accum']
+# gdf_2016['t_lb'] = lb_2016 / gdf_2016['accum']
+# gdf_2016['t_ub'] = ub_2016 / gdf_2016['accum']
 
 # %%
 
@@ -803,6 +773,65 @@ print(
     f"{(std_2016.values/accum_2016.values).mean()*100:.2f}% "
     f"for the 2016 flight."
 )
+
+#%%
+plt_accum2011 = gv.Points(
+    gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
+        projection=ANT_proj, color='accum', 
+        cmap='viridis', colorbar=True, size=1, 
+        bgcolor='silver', tools=['hover'], 
+        width=700, height=700)
+plt_accum2016 = gv.Points(
+    gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
+        projection=ANT_proj, color='accum', 
+        cmap='viridis', colorbar=True, size=1,
+        bgcolor='silver', tools=['hover'], 
+        width=700, height=700)
+
+# %%
+
+plt_loc2011 = gv.Points(
+    gdf_2011, crs=ANT_proj, vdims=['accum','std']).opts(
+        projection=ANT_proj, color='blue', alpha=0.9, 
+        size=1, bgcolor='silver', tools=['hover'], 
+        width=700, height=700)
+plt_loc2016 = gv.Points(
+    gdf_2016, crs=ANT_proj, vdims=['accum','std']).opts(
+        projection=ANT_proj, color='red', alpha=0.9, 
+        size=1, bgcolor='silver', tools=['hover'], 
+        width=700, height=700)
+plt_locCOMB = gv.Points(
+    gdf_PAIPR, crs=ANT_proj, 
+    vdims=['accum_2011','accum_2016']).opts(
+        projection=ANT_proj, color='mistyrose', 
+        size=10, bgcolor='silver', tools=['hover'], 
+        width=700, height=700)
+
+plt_locCOMB * (plt_accum2011 * plt_accum2016)
+
+# %%
+
+gdf_PAIPR['accum_mu'] = gdf_PAIPR[
+    ['accum_2011', 'accum_2016']].mean(axis=1)
+gdf_PAIPR['accum_res'] = (
+    (gdf_PAIPR.accum_2016 - gdf_PAIPR.accum_2011) 
+    / gdf_PAIPR.accum_mu)
+
+plt_accum = gv.Points(
+    data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_mu']).opts(
+        projection=ANT_proj, color='accum_mu', 
+        bgcolor='silver', colorbar=True, cmap='viridis', 
+        tools=['hover'], width=700, height=700)
+
+plt_res = gv.Points(
+    data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
+        projection=ANT_proj, color='accum_res', 
+        bgcolor='silver', colorbar=True, cmap='coolwarm_r', 
+        symmetric=True, tools=['hover'], 
+        width=700, height=700)
+
+
+(plt_accum + plt_res)
 
 # %%
 

@@ -194,7 +194,7 @@ def trace_combine(gdf_grid, accum_ALL, std_ALL):
     accum_df = pd.DataFrame(
         columns=np.arange(len(grid_pop)), 
         index=accum_ALL.index)
-    std_df = pd.DataFrame(
+    MoE_df = pd.DataFrame(
         columns=np.arange(len(grid_pop)), 
         index=accum_ALL.index)
     yr_count = pd.DataFrame(
@@ -203,7 +203,7 @@ def trace_combine(gdf_grid, accum_ALL, std_ALL):
     grid_final = gpd.GeoDataFrame(
         columns=[
             'grid_ID', 'elev', 'trace_count', 
-            'accum', 'std', 'geometry'], 
+            'accum', 'MoE', 'geometry'], 
         index=np.arange(len(grid_pop)), crs=gdf_grid.crs)
     
 
@@ -217,21 +217,45 @@ def trace_combine(gdf_grid, accum_ALL, std_ALL):
         accum_arr = accum_ALL.iloc[:,t_IDs]
         std_arr = std_ALL.iloc[:,t_IDs]
 
-        # Calculate weighted mean accum and std
-        weights = (1/std_arr) / np.tile(
-            (1/std_arr).sum(axis=1).to_numpy(), 
-            (std_arr.shape[1],1)). transpose()
-        accum_w = (accum_arr*weights).sum(axis=1)
-        std_w = np.sqrt(((std_arr**2)*weights).sum(axis=1))
+        nsim = 10
+        accum_sim = pd.DataFrame(np.zeros(
+            (accum_arr.shape[0], nsim*accum_arr.shape[1])), 
+            index=accum_arr.index)
+        for j in range(accum_arr.shape[1]):
+
+            col_mu = accum_arr.iloc[:,j]
+            col_std = std_arr.iloc[:,j]
+
+            for k in range(nsim):
+                accum_sim.iloc[:,(j*nsim+k)] = np.random.normal(
+                    loc=col_mu, scale=col_std)
+
+        accum_mu = accum_sim.mean(axis=1)
+        n_count = accum_sim.count(axis=1)
+        accum_moe = (
+            1.96*accum_sim.std(axis=1) 
+            / np.sqrt(n_count))
+
+        # # Calculate weighted mean accum and std
+        # weights = (1/std_arr) / np.tile(
+        #     (1/std_arr).sum(axis=1).to_numpy(), 
+        #     (std_arr.shape[1],1)). transpose()
+        # accum_w = (accum_arr*weights).sum(axis=1)
+        # std_w = np.sqrt(((std_arr**2)*weights).sum(axis=1))
+        # accum_mu = accum_w
+        # accum_moe = (
+        #     1.96*std_w
+        #     / np.sqrt(accum_arr.count(axis=1)))
 
         # Set missing data to NaN
-        nan_idx = np.invert(weights.sum(axis=1).astype('bool'))
-        accum_w[nan_idx] = np.nan
-        std_w[nan_idx] = np.nan
+        nan_idx = np.invert(
+            accum_arr.sum(axis=1).astype('bool'))
+        accum_mu[nan_idx] = np.nan
+        accum_moe[nan_idx] = np.nan
 
         # Add weighted mean and std to return arrays
-        accum_df.iloc[:,i] = accum_w
-        std_df.iloc[:,i] = std_w
+        accum_df.iloc[:,i] = accum_mu
+        MoE_df.iloc[:,i] = accum_moe
 
         # Get counts for number of records in annual 
         # estimates and add to return array
@@ -243,11 +267,12 @@ def trace_combine(gdf_grid, accum_ALL, std_ALL):
         grid_final.loc[i,'grid_ID'] = grid_idx
         grid_final.loc[i,'elev'] = gdf_tmp['elev'].mean()
         grid_final.loc[i, 'trace_count'] = len(t_IDs)
-        grid_final.loc[i,'accum'] = accum_w.mean()
-        grid_final.loc[i,'std'] = np.sqrt((std_w**2).mean())
+        grid_final.loc[i,'accum'] = accum_mu.mean()
+        grid_final.loc[i,'MoE'] = (
+            1.96*accum_mu.std()/np.sqrt(accum_mu.count()))
         grid_final.loc[i,'geometry'] = gdf_tmp.iloc[0].geometry
 
-    return grid_final, accum_df, std_df, yr_count
+    return grid_final, accum_df, MoE_df, yr_count
 
 def get_nearest(
     src_points, candidates, k_neighbors=1):
