@@ -233,7 +233,7 @@ plt_res.redim.range(accum_res=(res_min,res_max))
 
 # %%
 
-# Generate indices of corresponding to desiered sites
+# Generate indices corresponding to desired sites
 gdf_PAIPR['Site'] = np.repeat(
     'Null', gdf_PAIPR.shape[0])
 for label in chunk_centers['Site']:
@@ -249,7 +249,7 @@ for label in chunk_centers['Site']:
     gdf_PAIPR['Site'][idx] = label
 
 # Create dataframes for scatter plots
-accum_df = pd.DataFrame(
+PAIPR_df = pd.DataFrame(
     {'tmp_ID': np.tile(
         np.arange(0,accum_2011.shape[1]), 
         accum_2011.shape[0]), 
@@ -271,32 +271,45 @@ accum_df = pd.DataFrame(
 one_to_one = hv.Curve(
     data=pd.DataFrame(
         {'x':[100,750], 'y':[100,750]}))
-scatt_yr = hv.Points(
-    data=accum_df, 
-    kdims=['accum_2011', 'accum_2016'], 
-    vdims=['Year']).groupby('Year')
-(
-    one_to_one.opts(color='black') 
-    * scatt_yr.opts(
-        xlim=(100,750), ylim=(100,750), 
-        xlabel='2011 flight (mm/yr)', 
-        ylabel='2016 flight (mm/yr)'))
+# scatt_yr = hv.Points(
+#     data=PAIPR_df, 
+#     kdims=['accum_2011', 'accum_2016'], 
+#     vdims=['Year']).groupby('Year')
+# (
+#     one_to_one.opts(color='black') 
+#     * scatt_yr.opts(
+#         xlim=(100,750), ylim=(100,750), 
+#         xlabel='2011 flight (mm/yr)', 
+#         ylabel='2016 flight (mm/yr)'))
 
-# %%
+scatt_yr = hv.Points(
+    data=PAIPR_df, 
+    kdims=['accum_2011', 'accum_2016'], 
+    vdims=['Year'])
+    
+paipr_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 PAIPR flight (mm/yr)', 
+    ylabel='2016 PAIPR flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600)
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
         {'x':[100,750], 'y':[100,750]}))
 scatt_yr = hv.Points(
-    data=accum_df, 
+    data=PAIPR_df, 
     kdims=['accum_2011', 'accum_2016'], 
-    vdims=['Site']).groupby('Site')
-(
-    one_to_one.opts(color='black') 
-    * scatt_yr.opts(
-        xlim=(100,750), ylim=(100,750), 
-        xlabel='2011 flight (mm/yr)', 
-        ylabel='2016 flight (mm/yr)'))
+    vdims=['Year', 'Site']).groupby('Site')
+site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 flight (mm/yr)', 
+    ylabel='2016 flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600)
+
+paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
+paipr_1to1_plt_comb
 
 # %%
 
@@ -495,6 +508,30 @@ plot_TScomp(
     man2011_accum, Maccum_2011, gdf_traces2011, 
     labels=['2011 manual', '2011 PAIPR'])
 
+# %%
+
+# Create dataframes for scatter plots
+tmp_df1 = pd.DataFrame(
+    {'tmp_ID': np.tile(
+        np.arange(0,man2011_accum.shape[1]), 
+        man2011_accum.shape[0]), 
+    'Site': np.tile(
+        gdf_traces2011['Site'], man2011_accum.shape[0]), 
+    'Year': np.reshape(
+        np.repeat(man2011_accum.index, man2011_accum.shape[1]), 
+        man2011_accum.size), 
+    'accum_man': 
+        np.reshape(
+            man2011_accum.values, man2011_accum.size), 
+    'std_man': np.reshape(
+        man2011_std.values, man2011_std.size), 
+    'accum_paipr': np.reshape(
+        Maccum_2011.values, Maccum_2011.size), 
+    'std_paipr': np.reshape(
+        Mstd_2011.values, Mstd_2011.size)})
+
+tmp_df1['flight'] = 2011
+
 # %%[markdown]
 # ## 2016 PAIPR-manual comparisons
 # 
@@ -610,6 +647,68 @@ for label in chunk_centers['Site']:
 plot_TScomp(
     man2016_accum, Maccum_2016, gdf_traces2016, 
     labels=['2016 manual', '2016 PAIPR'])
+
+# %%
+
+# Create dataframes for scatter plots
+tmp_df2 = pd.DataFrame(
+    {'tmp_ID': np.tile(
+        (tmp_df1['tmp_ID'].max()+1) 
+        + np.arange(0,man2016_accum.shape[1]), 
+        man2016_accum.shape[0]), 
+    'Site': np.tile(
+        gdf_traces2016['Site'], man2016_accum.shape[0]), 
+    'Year': np.reshape(
+        np.repeat(man2016_accum.index, man2016_accum.shape[1]), 
+        man2016_accum.size), 
+    'accum_man': 
+        np.reshape(
+            man2016_accum.values, man2016_accum.size), 
+    'std_man': np.reshape(
+        man2016_std.values, man2016_std.size), 
+    'accum_paipr': np.reshape(
+        Maccum_2016.values, Maccum_2016.size), 
+    'std_paipr': np.reshape(
+        Mstd_2016.values, Mstd_2016.size)})
+
+tmp_df2['flight'] = 2016
+
+PAP_man_df = pd.concat([tmp_df1, tmp_df2], axis=0)
+
+# %%
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+
+scatt_yr = hv.Points(
+    data=PAP_man_df, 
+    kdims=['accum_man', 'accum_paipr'], 
+    vdims=['Year'])
+    
+PM_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='Manual accum (mm/yr)', 
+    ylabel='PAIPR accum (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600)
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+scatt_yr = hv.Points(
+    data=PAP_man_df, 
+    kdims=['accum_man', 'accum_paipr'], 
+    vdims=['Year', 'Site']).groupby('Site')
+site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='Manual accum (mm/yr)', 
+    ylabel='PAIPR accum (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600)
+
+PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
+PM_1to1_comb_plt
 
 # %%[markdown]
 # ## Manual repeatability tests
@@ -760,7 +859,7 @@ print(
 # %%
 
 # Create dataframes for scatter plots
-accum_df = pd.DataFrame(
+man_df = pd.DataFrame(
     {'Trace': np.tile(
         np.arange(0,accum_man2011.shape[1]), 
         accum_man2011.shape[0]), 
@@ -783,30 +882,40 @@ one_to_one = hv.Curve(
     data=pd.DataFrame(
         {'x':[100,750], 'y':[100,750]}))
 scatt_yr = hv.Points(
-    data=accum_df, 
+    data=man_df, 
     kdims=['accum_2011', 'accum_2016'], 
-    vdims=['Year']).groupby('Year')
-(
-    one_to_one.opts(color='black') 
-    * scatt_yr.opts(
-        xlim=(100,750), ylim=(100,750), 
-        xlabel='2011 flight (mm/yr)', 
-        ylabel='2016 flight (mm/yr)'))
+    vdims=['Year'])
 
-# %%
+man_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 flight (mm/yr)', 
+    ylabel='2016 flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600)
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
         {'x':[100,750], 'y':[100,750]}))
 scatt_yr = hv.Points(
-    data=accum_df, 
+    data=man_df, 
     kdims=['accum_2011', 'accum_2016'], 
-    vdims=['Site']).groupby('Site')
-(
-    one_to_one.opts(color='black') 
-    * scatt_yr.opts(
-        xlim=(100,750), ylim=(100,750), 
-        xlabel='2011 flight (mm/yr)', 
-        ylabel='2016 flight (mm/yr)'))
+    vdims=['Year', 'Site']).groupby('Site')
+site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 Manual flight (mm/yr)', 
+    ylabel='2016 Manual flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600)
+
+man_1to1_comb_plt = man_1to1_plt + site_res_plt
+man_1to1_comb_plt
+
+# %%
+
+hv.Layout(paipr_1to1_plt+PM_1to1_plt+man_1to1_plt).cols(2)
+
+# paipr_1to1_plt
+# PM_1to1_plt
+# man_1to1_plt
 
 # %%
