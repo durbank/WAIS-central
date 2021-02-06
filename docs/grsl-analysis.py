@@ -158,7 +158,7 @@ plt_locCOMB = gv.Points(
 plt_manPTS = gv.Points(
     chunk_centers, crs=ANT_proj, 
     vdims='Site').opts(
-        projection=ANT_proj, color='red', 
+        projection=ANT_proj, color='black', 
         size=15, marker='square')
 
 plt_labels = hv.Labels(
@@ -166,7 +166,7 @@ plt_labels = hv.Labels(
     'y': chunk_centers.geometry.y.values, 
     'text': chunk_centers.Site.values}, 
     ['x','y'], 'text').opts(
-        yoffset=20000, text_color='red', 
+        yoffset=20000, text_color='black', 
         text_font_size='18pt')
 
 (
@@ -208,7 +208,7 @@ print(
 
 gdf_PAIPR['accum_mu'] = gdf_PAIPR[
     ['accum_2011', 'accum_2016']].mean(axis=1)
-gdf_PAIPR['accum_res'] = (
+gdf_PAIPR['accum_res'] = 100*(
     (gdf_PAIPR.accum_2016 - gdf_PAIPR.accum_2011) 
     / gdf_PAIPR.accum_mu)
 
@@ -223,13 +223,14 @@ plt_accum = gv.Points(
 
 plt_res = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
-        projection=ANT_proj, color='accum_res', 
+        projection=ANT_proj, color='accum_res', size=2,
         bgcolor='silver', colorbar=True, cmap='coolwarm_r', 
         symmetric=True, tools=['hover'], 
-        width=700, height=700)
+        width=600, height=600, fontsize=1.75)
 
 
-plt_res.redim.range(accum_res=(res_min,res_max))
+plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
+plt_res
 
 # %%
 
@@ -289,10 +290,10 @@ scatt_yr = hv.Points(
     
 paipr_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     xlim=(100,750), ylim=(100,750), 
-    xlabel='2011 PAIPR flight (mm/yr)', 
-    ylabel='2016 PAIPR flight (mm/yr)', 
+    xlabel='2011 PAIPR (mm/yr)', 
+    ylabel='2016 PAIPR (mm/yr)', 
     color='Year', cmap='plasma', colorbar=True, 
-    width=600, height=600)
+    width=600, height=600, fontscale=1.75)
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -306,7 +307,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     xlabel='2011 flight (mm/yr)', 
     ylabel='2016 flight (mm/yr)', 
     color='Year', cmap='plasma', colorbar=True, 
-    width=600, height=600)
+    width=600, height=600, fontscale=1.75)
 
 paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 paipr_1to1_plt_comb
@@ -691,7 +692,7 @@ PM_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     xlabel='Manual accum (mm/yr)', 
     ylabel='PAIPR accum (mm/yr)', 
     color='Year', cmap='plasma', colorbar=True, 
-    width=600, height=600)
+    width=600, height=600, fontscale=1.75)
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -705,7 +706,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     xlabel='Manual accum (mm/yr)', 
     ylabel='PAIPR accum (mm/yr)', 
     color='Year', cmap='plasma', colorbar=True, 
-    width=600, height=600)
+    width=600, height=600, fontscale=1.75)
 
 PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
 PM_1to1_comb_plt
@@ -888,10 +889,10 @@ scatt_yr = hv.Points(
 
 man_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     xlim=(100,750), ylim=(100,750), 
-    xlabel='2011 flight (mm/yr)', 
-    ylabel='2016 flight (mm/yr)', 
+    xlabel='2011 manual (mm/yr)', 
+    ylabel='2016 manual (mm/yr)', 
     color='Year', cmap='plasma', colorbar=True, 
-    width=600, height=600)
+    width=600, height=600, fontscale=1.75)
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -905,17 +906,32 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     xlabel='2011 Manual flight (mm/yr)', 
     ylabel='2016 Manual flight (mm/yr)', 
     color='Year', cmap='plasma', colorbar=True, 
-    width=600, height=600)
+    width=600, height=600, fontscale=1.75)
 
 man_1to1_comb_plt = man_1to1_plt + site_res_plt
 man_1to1_comb_plt
 
+# %%[markdown]
+# ## Final figures used in article
+# 
+# %% Data location map
+
+data_map = (
+    plt_locCOMB * plt_manPTS 
+    * (plt_accum2011 * plt_accum2016) * plt_labels
+)
+
+data_map.opts(fontscale=1.75)
+
 # %%
 
-hv.Layout(paipr_1to1_plt+PM_1to1_plt+man_1to1_plt).cols(2)
+res_grid_plt = (
+    plt_manPTS.opts(color='black')
+    *plt_res.opts(fontsize=1.75)
+    *plt_labels.opts(text_color='black'))
 
-# paipr_1to1_plt
-# PM_1to1_plt
-# man_1to1_plt
+results_plt = hv.Layout(
+    paipr_1to1_plt+PM_1to1_plt+man_1to1_plt+res_grid_plt).cols(2)
+results_plt
 
 # %%
