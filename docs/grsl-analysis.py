@@ -14,8 +14,8 @@ from cartopy import crs as ccrs
 from bokeh.io import output_notebook
 from shapely.geometry import Point
 output_notebook()
-hv.extension('bokeh')
-gv.extension('bokeh')
+hv.extension('bokeh', 'matplotlib')
+gv.extension('bokeh', 'matplotlib')
 import seaborn as sns
 
 # Define plotting projection to use
@@ -173,23 +173,37 @@ plt_labels = hv.Labels(
     plt_locCOMB * plt_manPTS 
     * (plt_accum2011 * plt_accum2016) * plt_labels
 )
+
+# %% Experiments with matplotlib backend
+
+plt_accum2011 = gv.Points(
+    gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
+        projection=ANT_proj, color='accum', 
+        cmap='viridis', colorbar=True, s=3)
+
+fig = hv.render(plt_accum2011, backend='matplotlib')
+fig.set_size_inches((10,10))
+
+
 # %% PAIPR residuals
 
 # Calculate residuals (as % bias of mean accumulation)
-res_PAIPR = accum_2016.values - accum_2011.values 
+res_PAIPR = pd.DataFrame(
+    accum_2016.values - accum_2011.values, 
+    index=accum_2011.index) 
 accum_bar = np.mean(
     [accum_2016.mean(axis=0).values, 
     accum_2011.mean(axis=0).values], axis=0)
 resPAIPR_perc = res_PAIPR / accum_bar
 
-sns.kdeplot(resPAIPR_perc.reshape(res_PAIPR.size))
+sns.kdeplot(resPAIPR_perc.values.reshape(res_PAIPR.size))
 
 print(
     f"The mean bias between PAIPR-derived results "
     f"between 2016 and 2011 flights is "
-    f"{res_PAIPR.mean():.1f} mm/yr ("
-    f"{resPAIPR_perc.mean()*100:.2f}% of mean accum) "
-    f"with a RMSE of {resPAIPR_perc.std()*100:.2f}%."
+    f"{res_PAIPR.values.mean():.1f} mm/yr ("
+    f"{resPAIPR_perc.values.mean()*100:.2f}% of mean accum) "
+    f"with a RMSE of {resPAIPR_perc.values.std()*100:.2f}%."
 )
 print(
     f"The mean annual accumulation for PAIPR results are "
@@ -355,7 +369,7 @@ data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
 data_2011 = format_PAIPR(
-    data_0, start_yr=1985, end_yr=2010).drop(
+    data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2011_ALL = data_2011.pivot(
     index='Year', columns='trace_ID', values='accum')
@@ -366,7 +380,7 @@ std2011_ALL = data_2011.pivot(
 dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
 data_0 = import_PAIPR(dir_0)
 man_2011 = format_PAIPR(
-    data_0, start_yr=1985, end_yr=2010).drop(
+    data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 man2011_ALL = man_2011.pivot(
     index='Year', columns='trace_ID', values='accum')
@@ -407,7 +421,9 @@ gdf_traces2011 = gpd.GeoDataFrame(
 
 
 # Calculate residuals (as % bias of mean accumulation)
-res_2011 = Maccum_2011.values - man2011_accum.values
+res_2011 = pd.DataFrame(
+    Maccum_2011.values - man2011_accum.values, 
+    index=Maccum_2011.index)
 accum_bar = np.mean(
     [Maccum_2011.mean(axis=0).values, 
     man2011_accum.mean(axis=0).values], 
@@ -416,15 +432,15 @@ res2011_perc = res_2011 / accum_bar
 
 fig, ax = plt.subplots()
 ax = sns.kdeplot(
-    res_2011.reshape(res_2011.size), color='blue')
+    res_2011.values.reshape(res_2011.size), color='blue')
 fig.show()
 
 print(
     f"The mean bias between manually-traced and "
     f"PAIPR-derived accumulation for 2011 is "
-    f"{res_2011.mean():.2f} mm/yr ("
-    f"{res2011_perc.mean()*100:.2f}% of the mean accumulation) "
-    f"with a RMSE of {res2011_perc.std()*100:.2f}%"
+    f"{res_2011.values.mean():.2f} mm/yr ("
+    f"{res2011_perc.values.mean()*100:.2f}% of the mean accumulation) "
+    f"with a RMSE of {res2011_perc.values.std()*100:.2f}%"
 )
 print(
     f"The mean annual accumulation for 2011 results are "
@@ -546,7 +562,7 @@ data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
 data_2016 = format_PAIPR(
-    data_0, start_yr=1990, end_yr=2015).drop(
+    data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2016_ALL = data_2016.pivot(
     index='Year', columns='trace_ID', values='accum')
@@ -557,7 +573,7 @@ std2016_ALL = data_2016.pivot(
 dir_0 = ROOT_DIR.joinpath('data/smb_manual/20161109/')
 data_0 = import_PAIPR(dir_0)
 man_2016 = format_PAIPR(
-    data_0, start_yr=1990, end_yr=2015).drop(
+    data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 man2016_ALL = man_2016.pivot(
     index='Year', columns='trace_ID', values='accum')
@@ -597,25 +613,27 @@ gdf_traces2016 = gpd.GeoDataFrame(
     geometry=dist_overlap2.geometry.values)
 
 # Calculate residuals (as % bias of mean accumulation)
-res_2016 = Maccum_2016.values - man2016_accum.values
+res_2016 = pd.DataFrame(
+    Maccum_2016.values - man2016_accum.values, 
+    index=Maccum_2016.index)
 accum_bar = np.mean(
     [Maccum_2016.mean(axis=0), 
     man2016_accum.mean(axis=0)], axis=0)
 res2016_perc = res_2016 / accum_bar
 
-sns.kdeplot(res2016_perc.reshape(res_2016.size))
+sns.kdeplot(res2016_perc.values.reshape(res_2016.size))
 
 print(
     f"The mean bias between manually-traced and "
     f"PAIPR-derived accumulation for 2016 is "
-    f"{res_2016.mean():.2f} mm/yr ("
-    f"{res2016_perc.mean()*100:.2f}% of mean accum) "
-    f"with a RMSE of {res2016_perc.std()*100:.2f}%."
+    f"{res_2016.values.mean():.2f} mm/yr ("
+    f"{res2016_perc.values.mean()*100:.2f}% of mean accum) "
+    f"with a RMSE of {res2016_perc.values.std()*100:.2f}%."
 )
 print(
     f"The mean annual accumulation for 2016 results are "
     f"{Maccum_2016.values.mean():.0f} mm/yr for PAIPR " 
-    f"and {man2016_accum.values.mean():.0f} mm\yr "
+    f"and {man2016_accum.values.mean():.0f} mm/yr "
     f"for manual results."
 )
 print(
@@ -918,20 +936,67 @@ man_1to1_comb_plt
 
 data_map = (
     plt_locCOMB * plt_manPTS 
-    * (plt_accum2011 * plt_accum2016) * plt_labels
+    * (plt_accum2011 * plt_accum2016) 
+    * plt_labels.opts(text_font_size='32pt')
 )
 
-data_map.opts(fontscale=1.75)
+data_map.opts(fontscale=2.5, width=1200, height=1200)
 
 # %%
 
 res_grid_plt = (
-    plt_manPTS.opts(color='black')
-    *plt_res.opts(fontsize=1.75)
-    *plt_labels.opts(text_color='black'))
+    plt_manPTS.opts(color='black')*
+    plt_res.opts(size=5)
+    * plt_labels.opts(
+        text_color='black', text_font_size='22pt')).opts(
+            fontscale=1.75)
 
 results_plt = hv.Layout(
     paipr_1to1_plt+PM_1to1_plt+man_1to1_plt+res_grid_plt).cols(2)
 results_plt
 
+# %%
+
+from bokeh.io import export_svgs
+
+def export_svg(obj, filename):
+    plot_state = hv.renderer('bokeh').get_plot(obj).state
+    plot_state.output_backend = 'svg'
+    export_svgs(plot_state, filename=filename)
+
+# p = hv.render(data_map, backend='matplotlib')
+
+# export_svg(data_map, ROOT_DIR.joinpath(
+#     'docs/Figures/oib-repeat/data_map.svg'))
+
+# hv.save(data_map, ROOT_DIR.joinpath(
+#     'docs/Figures/oib-repeat/data_map.png'))
+# hv.save(results_plt, ROOT_DIR.joinpath(
+#     'docs/Figures/oib-repeat/results.png'))
+
+# %%
+
+fig, ax = plt.subplots()
+res_PAIPR.mean(axis=1).plot(
+    ax=ax, label='PAIPR', color='blue')
+(res_PAIPR.mean(axis=1)+res_PAIPR.std(axis=1)).plot(
+    ax=ax, label='__none__', color='blue', linestyle='--')
+(res_PAIPR.mean(axis=1)-res_PAIPR.std(axis=1)).plot(
+    ax=ax, label='__none__', color='blue', linestyle='--')
+man_res.mean(axis=1).plot(
+    ax=ax, label='manual', color='orange')
+(man_res.mean(axis=1)+man_res.std(axis=1)).plot(
+    ax=ax, label='__none__', color='orange', linestyle='--')
+(man_res.mean(axis=1)-man_res.std(axis=1)).plot(
+    ax=ax, label='__none__', color='orange', linestyle='--')
+res_tmp.mean(axis=1).plot(
+    ax=ax, label='man-correct', color='green')
+(res_tmp.mean(axis=1)+res_tmp.std(axis=1)).plot(
+    ax=ax, label='__none__', color='green', linestyle='--')
+(res_tmp.mean(axis=1)-res_tmp.std(axis=1)).plot(
+    ax=ax, label='__none__', color='green', linestyle='--')
+# res_2011.mean(axis=1).plot(ax=ax, label='2011', color='red')
+# res_2016.mean(axis=1).plot(ax=ax, label='2016', color='purple')
+ax.legend()
+fig.show()
 # %%
