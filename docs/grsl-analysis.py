@@ -110,15 +110,25 @@ gdf_PAIPR['accum_res'] = (
 
 # Assign flight chunk label based on location
 chunk_centers = gpd.GeoDataFrame({
-    'Site': ['A', 'C', 'D', 'E', 'F', 'B'],
-    'Name': ['PIG', 'SEAT2010-6', 'SEAT2010-5', 
-    'SEAT2010-4', 'high-accum', 'mid-accum']},
+    'Site': ['A', 'B', 'C', 'D', 'E', 'F'],
+    'Name': ['A', 'B', 'C', 'D', 'E', 'F']},
     geometry=gpd.points_from_xy(
-        [-1.297E6, -1.024E6, -1.093E6, 
-            -1.159E6, -1.263E6, -1.177E6], 
-        [-1.409E5, -4.639E5, -4.639E5, 
-            -4.640E5, -4.668E5, -2.898E5]), 
+        [-1.177E6, -1.115E6, -1.024E6, -1.093E6, 
+            -1.159E6, -1.263E6], 
+        [-2.898E5, -3.681E5, -4.639E5, -4.639E5, 
+            -4.640E5, -4.668E5]), 
     crs="EPSG:3031")
+
+# # Assign flight chunk label based on location
+# chunk_centers = gpd.GeoDataFrame({
+#     'Site': ['PIG', 'A', 'B', 'C', 'D', 'E', 'F'],
+#     'Name': ['PIG', 'A', 'B', 'C', 'D', 'E', 'F']},
+#     geometry=gpd.points_from_xy(
+#         [-1.297E6, -1.177E6, -1.115E6, -1.024E6, 
+#             -1.093E6, -1.159E6, -1.263E6], 
+#         [-1.409E5, -2.898E5, -3.681E5, -4.639E5, 
+#             -4.639E5, -4.640E5, -4.668E5]), 
+#     crs="EPSG:3031")
 
 #%% Data location map
 
@@ -176,13 +186,13 @@ plt_labels = hv.Labels(
 
 # %% Experiments with matplotlib backend
 
-plt_accum2011 = gv.Points(
-    gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
-        projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, s=3)
+# plt_accum2011 = gv.Points(
+#     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
+#         projection=ANT_proj, color='accum', 
+#         cmap='viridis', colorbar=True, s=3)
 
-fig = hv.render(plt_accum2011, backend='matplotlib')
-fig.set_size_inches((10,10))
+# fig = hv.render(plt_accum2011, backend='matplotlib')
+# fig.set_size_inches((10,10))
 
 
 # %% PAIPR residuals
@@ -445,7 +455,7 @@ print(
 print(
     f"The mean annual accumulation for 2011 results are "
     f"{Maccum_2011.values.mean():.0f} mm/yr for PAIPR " 
-    f"and {man2011_accum.values.mean():.0f} mm\yr "
+    f"and {man2011_accum.values.mean():.0f} mm/yr "
     f"for manual results."
 )
 print(
@@ -461,7 +471,7 @@ print(
 def plot_TScomp(
     ts_df1, ts_df2, gdf_combo, labels, 
     colors=['blue', 'red']):
-    """This is s function to generate matplotlib objects that compare spatially overlapping accumulation time series.
+    """This is a function to generate matplotlib objects that compare spatially overlapping accumulation time series.
 
     Args:
         ts_df1 (pandas.DataFrame): Dataframe containing time series for the first dataset.
@@ -474,34 +484,62 @@ def plot_TScomp(
     if "Null" in site_list:
         site_list.remove("Null")
 
-    for site in site_list:
+    fig, axes = plt.subplots(
+        ncols=1, nrows=len(site_list), 
+        constrained_layout=True, 
+        figsize=(6,24))
+
+    for i, site in enumerate(site_list):
 
         idx = np.flatnonzero(gdf_combo['Site']==site)
         df1 = ts_df1.iloc[:,idx]
         df2 = ts_df2.iloc[:,idx]
-        fig, ax = plt.subplots()
+        # fig, ax = plt.subplots()
     
-        df1.mean(axis=1).plot(ax=ax, color=colors[0], 
+        df1.mean(axis=1).plot(ax=axes[i], color=colors[0], 
             linewidth=2, label=labels[0])
         (df1.mean(axis=1)+df1.std(axis=1)).plot(
-            ax=ax, color=colors[0], linestyle='--', 
+            ax=axes[i], color=colors[0], linestyle='--', 
             label='__nolegend__')
         (df1.mean(axis=1)-df1.std(axis=1)).plot(
-            ax=ax, color=colors[0], linestyle='--', 
+            ax=axes[i], color=colors[0], linestyle='--', 
             label='__nolegend__')
 
         df2.mean(axis=1).plot(
-            ax=ax, color=colors[1], linewidth=2, 
+            ax=axes[i], color=colors[1], linewidth=2, 
             label=labels[1])
         (df2.mean(axis=1)+df2.std(axis=1)).plot(
-            ax=ax, color=colors[1], linestyle='--', 
+            ax=axes[i], color=colors[1], linestyle='--', 
             label='__nolegend__')
         (df2.mean(axis=1)-df2.std(axis=1)).plot(
-            ax=ax, color=colors[1], linestyle='--', 
+            ax=axes[i], color=colors[1], linestyle='--', 
             label='__nolegend__')
-        ax.legend()
-        fig.suptitle(site+' time series')
-        fig.show()
+        axes[i].legend()
+        axes[i].set_title('Site '+site+' time series')
+
+        # df1.mean(axis=1).plot(ax=ax, color=colors[0], 
+        #     linewidth=2, label=labels[0])
+        # (df1.mean(axis=1)+df1.std(axis=1)).plot(
+        #     ax=ax, color=colors[0], linestyle='--', 
+        #     label='__nolegend__')
+        # (df1.mean(axis=1)-df1.std(axis=1)).plot(
+        #     ax=ax, color=colors[0], linestyle='--', 
+        #     label='__nolegend__')
+
+        # df2.mean(axis=1).plot(
+        #     ax=ax, color=colors[1], linewidth=2, 
+        #     label=labels[1])
+        # (df2.mean(axis=1)+df2.std(axis=1)).plot(
+        #     ax=ax, color=colors[1], linestyle='--', 
+        #     label='__nolegend__')
+        # (df2.mean(axis=1)-df2.std(axis=1)).plot(
+        #     ax=ax, color=colors[1], linestyle='--', 
+        #     label='__nolegend__')
+        # ax.legend()
+        # fig.suptitle(site+' time series')
+        # fig.show()
+
+    return fig
 
 # %% 2011 comparison plots
 
@@ -521,7 +559,7 @@ for label in chunk_centers['Site']:
     gdf_traces2011['Site'][idx] = label
 
 
-plot_TScomp(
+tsfig_2011 = plot_TScomp(
     man2011_accum, Maccum_2011, gdf_traces2011, 
     labels=['2011 manual', '2011 PAIPR'])
 
@@ -663,7 +701,7 @@ for label in chunk_centers['Site']:
     gdf_traces2016['Site'][idx] = label
 
 
-plot_TScomp(
+tsfig_2016 = plot_TScomp(
     man2016_accum, Maccum_2016, gdf_traces2016, 
     labels=['2016 manual', '2016 PAIPR'])
 
@@ -780,7 +818,7 @@ std_man2011 = manSTD_2011_ALL.iloc[
     :,dist_overlap['trace_ID']]
 accum_man2016 = man2016_ALL.iloc[
     :,dist_overlap.index]
-std_man2016 = manSTD_2011_ALL.iloc[
+std_man2016 = manSTD_2016_ALL.iloc[
     :,dist_overlap.index]
 
 # Create new gdf of subsetted results
@@ -809,7 +847,7 @@ for label in chunk_centers['Site']:
     gdf_MANtraces['Site'][idx] = label
 
 
-plot_TScomp(
+tsfig_manual = plot_TScomp(
     accum_man2011, accum_man2016, gdf_MANtraces, 
     labels=['2011 manual', '2016 manual'])
 
@@ -957,6 +995,52 @@ results_plt
 
 # %%
 
+tsfig_PAIPR = plot_TScomp(
+    accum_2011, accum_2016, gdf_PAIPR, 
+    labels=['2011 PAIPR', '2016 PAIPR'])
+
+# %%
+
+tsfig_PAIPR.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_PAIPR.svg'))
+tsfig_manual.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_man.svg'))
+tsfig_2011.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_2011.svg'))
+tsfig_2016.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_2016.svg'))
+
+# %%
+
+# fig = plt.figure(constrained_layout=True)
+# gs = fig.add_gridspec(6,4)
+
+# fig_list = [tsfig_PAIPR, tsfig_manual, tsfig_2011, tsfig_2016]
+
+# for i, fig_i in enumerate(fig_list):
+#     axes = fig_i.get_axes()
+#     for j, ax in enumerate(axes):
+#         gs[j,i] = ax
+#         # fig.add_subplot(gs[j,i])
+
+
+
+
+
+
+
+# fig_list = [tsfig_PAIPR, tsfig_manual, tsfig_2011, tsfig_2016]
+
+# fig, axes = plt.subplots(
+#     ncols=len(fig_list), nrows=6, constrained_layout=True, 
+#     figsize=(20, 30))
+
+# %%
+
 from bokeh.io import export_svgs
 
 def export_svg(obj, filename):
@@ -969,34 +1053,35 @@ def export_svg(obj, filename):
 # export_svg(data_map, ROOT_DIR.joinpath(
 #     'docs/Figures/oib-repeat/data_map.svg'))
 
-# hv.save(data_map, ROOT_DIR.joinpath(
-#     'docs/Figures/oib-repeat/data_map.png'))
-# hv.save(results_plt, ROOT_DIR.joinpath(
-#     'docs/Figures/oib-repeat/results.png'))
+hv.save(data_map, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/data_map.png'))
+hv.save(results_plt, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/results.png'))
 
 # %%
 
-fig, ax = plt.subplots()
-res_PAIPR.mean(axis=1).plot(
-    ax=ax, label='PAIPR', color='blue')
-(res_PAIPR.mean(axis=1)+res_PAIPR.std(axis=1)).plot(
-    ax=ax, label='__none__', color='blue', linestyle='--')
-(res_PAIPR.mean(axis=1)-res_PAIPR.std(axis=1)).plot(
-    ax=ax, label='__none__', color='blue', linestyle='--')
-man_res.mean(axis=1).plot(
-    ax=ax, label='manual', color='orange')
-(man_res.mean(axis=1)+man_res.std(axis=1)).plot(
-    ax=ax, label='__none__', color='orange', linestyle='--')
-(man_res.mean(axis=1)-man_res.std(axis=1)).plot(
-    ax=ax, label='__none__', color='orange', linestyle='--')
-res_tmp.mean(axis=1).plot(
-    ax=ax, label='man-correct', color='green')
-(res_tmp.mean(axis=1)+res_tmp.std(axis=1)).plot(
-    ax=ax, label='__none__', color='green', linestyle='--')
-(res_tmp.mean(axis=1)-res_tmp.std(axis=1)).plot(
-    ax=ax, label='__none__', color='green', linestyle='--')
-# res_2011.mean(axis=1).plot(ax=ax, label='2011', color='red')
-# res_2016.mean(axis=1).plot(ax=ax, label='2016', color='purple')
-ax.legend()
-fig.show()
+# fig, ax = plt.subplots()
+# res_PAIPR.mean(axis=1).plot(
+#     ax=ax, label='PAIPR', color='blue')
+# (res_PAIPR.mean(axis=1)+res_PAIPR.std(axis=1)).plot(
+#     ax=ax, label='__none__', color='blue', linestyle='--')
+# (res_PAIPR.mean(axis=1)-res_PAIPR.std(axis=1)).plot(
+#     ax=ax, label='__none__', color='blue', linestyle='--')
+# man_res.mean(axis=1).plot(
+#     ax=ax, label='manual', color='orange')
+# (man_res.mean(axis=1)+man_res.std(axis=1)).plot(
+#     ax=ax, label='__none__', color='orange', linestyle='--')
+# (man_res.mean(axis=1)-man_res.std(axis=1)).plot(
+#     ax=ax, label='__none__', color='orange', linestyle='--')
+# res_tmp.mean(axis=1).plot(
+#     ax=ax, label='man-correct', color='green')
+# (res_tmp.mean(axis=1)+res_tmp.std(axis=1)).plot(
+#     ax=ax, label='__none__', color='green', linestyle='--')
+# (res_tmp.mean(axis=1)-res_tmp.std(axis=1)).plot(
+#     ax=ax, label='__none__', color='green', linestyle='--')
+# # res_2011.mean(axis=1).plot(ax=ax, label='2011', color='red')
+# # res_2016.mean(axis=1).plot(ax=ax, label='2016', color='purple')
+# ax.legend()
+# fig.show()
+
 # %%
