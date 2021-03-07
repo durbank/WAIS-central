@@ -901,29 +901,29 @@ data_map = (
     * plt_labels.opts(text_font_size='32pt')
 )
 
-data_map.opts(fontscale=2.5, width=1200, height=1200)
+data_map = data_map.opts(fontscale=2.5, width=1200, height=1200)
 
 # %% Density plots
 
 plt.rcParams.update({'font.size': 22})
-fig = plt.figure(figsize=(12,8))
+kde_fig = plt.figure(figsize=(12,8))
 
-ax1 = fig.add_subplot()
+ax1 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax1, 
     data=resPAIPR_perc.values.reshape(resPAIPR_perc.size), 
     label='2016-2011 PAIPR', linewidth=3)
-ax2 = fig.add_subplot()
+ax2 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax2, 
     data=res2011_perc.values.reshape(res2011_perc.size), 
     label='2011 PAIPR-manual', linewidth=3)   
-ax3 = fig.add_subplot()
+ax3 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax3, 
     data=res2016_perc.values.reshape(res2016_perc.size), 
     label='2016 PAIPR-manual', linewidth=3)
-ax4 = fig.add_subplot()
+ax4 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax4, 
     data=man_res_perc.values.reshape(man_res_perc.size), 
@@ -1027,31 +1027,190 @@ print(
 
 # %%
 
-res_grid_plt = (
-    plt_manPTS.opts(color='black')*
-    plt_res.opts(size=5)
-    * plt_labels.opts(
-        text_color='black', text_font_size='22pt')).opts(
-            fontscale=1.75)
+def panels_121(
+    datum_1, datum_2, 
+    xlabels=[
+        '2011 PAIPR (mm/yr)', '2011 manual (mm/yr)', 
+        '2011 PAIPR (mm/yr)', '2016 PAIPR (mm/yr)'], 
+    ylabels=[
+    '2016 PAIPR (mm/yr)', '2016 manual (mm/yr)', 
+    '2011 manual (mm/yr', '2016 manual (mm/yr)'],
+    kde_colors=['blue', 'red', 'purple', 'orange'], 
+    kde_labels=[
+        '2016-2011 PAIPR', '2016-2011 manual', 
+        '2011 PAIPR-manual', '2016 PAIPR-manual'], 
+    plot_min=None, plot_max=None, size=600):
+    
+    """A function to generate a Holoviews Layout consisting of 1:1 plots of the given datum, with a kernel density plot also showing the residuals between datum-1 and datum-2.
 
-results_plt = hv.Layout(
-    paipr_1to1_plt+PM_1to1_plt+man_1to1_plt+res_grid_plt).cols(2)
-results_plt
+    Args:
+        datum_1 (list of pandas.DataFrames): Data to be included on the x-axis of 1:1 plots.
+        datum_2 (list of pandas.DataFrames): Data to be included on the y-axis of 1:1 plots.
+        xlabels (list, optional): List of strings to use as the x-labels for the 1:1 plots. Defaults to [ '2011 PAIPR (mm/yr)', '2011 manual (mm/yr)', '2011 PAIPR (mm/yr)', '2016 PAIPR (mm/yr)'].
+        ylabels (list, optional): List of strings to use as the y-labels for the 1:1 plots. Defaults to [ '2016 PAIPR (mm/yr)', '2016 manual (mm/yr)', '2011 manual (mm/yr', '2016 manual (mm/yr)'].
+        kde_colors (list, optional): List of colors to use in kde plots. Defaults to ['blue', 'red', 'purple', 'orange'].
+        kde_labels (list, optional): List of labels to use in kde plots. Defaults to [ '2016-2011 PAIPR', '2016-2011 manual', '2011 PAIPR-manual', '2016 PAIPR-manual'].
+        size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 600.
+
+    Returns:
+        holoviews.core.layout.Layout: Figure Layout consisting of multiple 1:1 subplots and a subplot with kernel density estimates of the residuals of the various datum.
+    """
+
+    # Preallocate subplot lists
+    one2one_plts = []
+    kde_plots = []
+
+    # Iterate through different input data
+    for i, data1 in enumerate(datum_1):
+
+        # Generate DataFrame of inputs in long tidy format
+        long_df = pd.DataFrame(
+            {'Trace': np.tile(
+                np.arange(0,data1.shape[1]), 
+                data1.shape[0]), 
+            'Year': np.reshape(
+                np.repeat(data1.index, data1.shape[1]), 
+                data1.size), 
+            'Accum_x': np.reshape(
+                data1.values, data1.size), 
+            'Accum_y': np.reshape(
+                datum_2[i].values, datum_2[i].size)
+        })
+    
+        # Get global axis bounds and generate 1:1 line
+        if plot_min is None:
+            plot_min = np.min(
+                [long_df['Accum_x'].min(), long_df['Accum_y'].min()])
+        if plot_max is None:
+            plot_max = np.max(
+                [long_df['Accum_x'].max(), long_df['Accum_y'].max()])
+        one2one_line = hv.Curve(data=pd.DataFrame(
+            {'x':[plot_min, plot_max], 
+            'y':[plot_min, plot_max]})).opts(color='black')
+
+        # Generate 1:1 scatter plot, gradated by year
+        scatt_yr = hv.Points(
+            data=long_df, kdims=['Accum_x', 'Accum_y'], 
+            vdims=['Year'])
+
+        # Combine 1:1 line and scatter plot and add to plot list
+        one2one_plt = one2one_line * scatt_yr.opts(
+            xlim=(plot_min, plot_max), 
+            ylim=(plot_min, plot_max), 
+            xlabel=xlabels[i], 
+            ylabel=ylabels[i], 
+            color='Year', cmap='plasma', colorbar=True, 
+            width=size, height=size, fontscale=1.5)
+        one2one_plts.append(one2one_plt)
+
+        # Generate kde for residuals of given estimates and 
+        # add to plot list 
+        kde_data = (
+            100*(long_df['Accum_y']-long_df['Accum_x']) 
+            / long_df[['Accum_x', 'Accum_y']].mean(axis=1))
+        kde_plot = hv.Distribution(
+            kde_data, label=kde_labels[i]).opts(
+            filled=False, line_color=kde_colors[i])
+        kde_plots.append(kde_plot)
+
+    # Generate and decorate combined density subplot
+    fig_kde = (
+        kde_plots[0] * kde_plots[1] 
+        * kde_plots[2] * kde_plots[3]).opts(
+            xlabel='Accum residual (% of mean accum)', 
+            width=size, height=size)
+
+    # Generate final panel Layout with 1:1 and kde plots
+    fig_layout = hv.Layout(
+        one2one_plts[0] + one2one_plts[1] 
+        + one2one_plts[2] + one2one_plts[3] 
+        + fig_kde).cols(5)
+    
+    return fig_layout
 
 # %%
 
-# tsfig_PAIPR.savefig(
-#     fname=ROOT_DIR.joinpath(
-#         'docs/Figures/oib-repeat/tsfig_PAIPR.svg'))
-# tsfig_manual.savefig(
-#     fname=ROOT_DIR.joinpath(
-#         'docs/Figures/oib-repeat/tsfig_man.svg'))
-# tsfig_2011.savefig(
-#     fname=ROOT_DIR.joinpath(
-#         'docs/Figures/oib-repeat/tsfig_2011.svg'))
-# tsfig_2016.savefig(
-#     fname=ROOT_DIR.joinpath(
-#         'docs/Figures/oib-repeat/tsfig_2016.svg'))
+# Preallocate Layout list
+figs_supp2 = []
+
+# Add full dataset Layout to Layout list
+figs_supp2.append(
+        panels_121(
+        datum_1=[
+            accum_2011, accum_man2011, 
+            Maccum_2011, Maccum_2016], 
+        datum_2=[
+            accum_2016, accum_man2016, 
+            man2011_accum, man2016_accum], 
+            plot_min=100, plot_max=800))
+
+# Get list of unique sites in data
+site_list = np.unique(gdf_PAIPR['Site']).tolist()
+site_list.remove("Null")
+
+# Iterate through sites
+for site in site_list:
+
+    # Get indices of current site in the given datasets
+    PAIPR_idx = np.flatnonzero(gdf_PAIPR['Site']==site)
+    MAN_idx = np.flatnonzero(gdf_MANtraces['Site']==site)
+    traces2011_idx = np.flatnonzero(gdf_traces2011['Site']==site)
+    traces2016_idx = np.flatnonzero(gdf_traces2016['Site']==site)
+
+    # Subset datum to current site
+    data1 = [
+        accum_2011.iloc[:,PAIPR_idx], 
+        accum_man2011.iloc[:,MAN_idx], 
+        Maccum_2011.iloc[:,traces2011_idx], 
+        Maccum_2016.iloc[:,traces2016_idx]]
+    data2 = [
+        accum_2016.iloc[:,PAIPR_idx], 
+        accum_man2016.iloc[:,MAN_idx], 
+        man2011_accum.iloc[:,traces2011_idx], 
+        man2016_accum.iloc[:,traces2016_idx]]
+
+    # Generate panel figures for current site and add 
+    # to figure list
+    figs_supp2.append(panels_121(
+        datum_1=data1, datum_2=data2, 
+        plot_min=100, plot_max=800))
+
+# Combine individual site panels to final Supplementary figure
+fig_supp2 = hv.Layout(
+    figs_supp2[0] + figs_supp2[1] + figs_supp2[2] 
+    + figs_supp2[3] + figs_supp2[4] + figs_supp2[5]
+    + figs_supp2[6]).cols(5)
+
+# %%
+
+# res_grid_plt = (
+#     plt_manPTS.opts(color='black')*
+#     plt_res.opts(size=5)
+#     * plt_labels.opts(
+#         text_color='black', text_font_size='22pt')).opts(
+#             fontscale=1.75)
+
+# results_plt = hv.Layout(
+#     paipr_1to1_plt+PM_1to1_plt+man_1to1_plt+res_grid_plt).cols(2)
+# results_plt
+
+# %%
+
+tsfig_PAIPR.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_PAIPR.svg'))
+tsfig_manual.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_man.svg'))
+tsfig_2011.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_2011.svg'))
+tsfig_2016.savefig(
+    fname=ROOT_DIR.joinpath(
+        'docs/Figures/oib-repeat/tsfig_2016.svg'))
+
+kde_fig.savefig(
+    fname='docs/Figures/oib-repeat/kde_fig.svg')
 
 # %%
 
@@ -1094,7 +1253,9 @@ def export_svg(obj, filename):
 
 hv.save(data_map, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/data_map.png'))
-hv.save(results_plt, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/results.png'))
+# hv.save(results_plt, ROOT_DIR.joinpath(
+#     'docs/Figures/oib-repeat/results.png'))
+hv.save(fig_supp2, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/one2one_plts.png'))
 
 # %%
