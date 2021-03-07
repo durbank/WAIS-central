@@ -179,10 +179,10 @@ plt_labels = hv.Labels(
         yoffset=20000, text_color='black', 
         text_font_size='18pt')
 
-(
-    plt_locCOMB * plt_manPTS 
-    * (plt_accum2011 * plt_accum2016) * plt_labels
-)
+# (
+#     plt_locCOMB * plt_manPTS 
+#     * (plt_accum2011 * plt_accum2016) * plt_labels
+# )
 
 # %% Experiments with matplotlib backend
 
@@ -204,30 +204,8 @@ res_PAIPR = pd.DataFrame(
 accum_bar = np.mean(
     [accum_2016.mean(axis=0).values, 
     accum_2011.mean(axis=0).values], axis=0)
-resPAIPR_perc = res_PAIPR / accum_bar
+resPAIPR_perc = 100*(res_PAIPR / accum_bar)
 
-sns.kdeplot(resPAIPR_perc.values.reshape(res_PAIPR.size))
-
-print(
-    f"The mean bias between PAIPR-derived results "
-    f"between 2016 and 2011 flights is "
-    f"{res_PAIPR.values.mean():.1f} mm/yr ("
-    f"{resPAIPR_perc.values.mean()*100:.2f}% of mean accum) "
-    f"with a RMSE of {resPAIPR_perc.values.std()*100:.2f}%."
-)
-print(
-    f"The mean annual accumulation for PAIPR results are "
-    f"{accum_2011.values.mean():.0f} mm/yr for 2011 " 
-    f"and {accum_2016.values.mean():.0f} mm/yr for 2016"
-)
-print(
-    f"The mean standard deviations of the annual "
-    f"accumulation estimates are "
-    f"{(std_2011.values/accum_2011.values).mean()*100:.2f}% " 
-    f"for the 2011 flight and "
-    f"{(std_2016.values/accum_2016.values).mean()*100:.2f}% "
-    f"for the 2016 flight."
-)
 # %% Spatial distribution in PAIPR residuals
 
 gdf_PAIPR['accum_mu'] = gdf_PAIPR[
@@ -254,7 +232,7 @@ plt_res = gv.Points(
 
 
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
-plt_res
+# plt_res
 
 # %%
 
@@ -334,7 +312,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     width=600, height=600, fontscale=1.75)
 
 paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
-paipr_1to1_plt_comb
+# paipr_1to1_plt_comb
 
 # %%
 
@@ -429,7 +407,6 @@ gdf_traces2011 = gpd.GeoDataFrame(
     'accum_PAIPR': Maccum_2011.mean(axis=0).values},
     geometry=dist_overlap1.geometry.values)
 
-
 # Calculate residuals (as % bias of mean accumulation)
 res_2011 = pd.DataFrame(
     Maccum_2011.values - man2011_accum.values, 
@@ -438,39 +415,13 @@ accum_bar = np.mean(
     [Maccum_2011.mean(axis=0).values, 
     man2011_accum.mean(axis=0).values], 
     axis=0)
-res2011_perc = res_2011 / accum_bar
-
-fig, ax = plt.subplots()
-ax = sns.kdeplot(
-    res_2011.values.reshape(res_2011.size), color='blue')
-fig.show()
-
-print(
-    f"The mean bias between manually-traced and "
-    f"PAIPR-derived accumulation for 2011 is "
-    f"{res_2011.values.mean():.2f} mm/yr ("
-    f"{res2011_perc.values.mean()*100:.2f}% of the mean accumulation) "
-    f"with a RMSE of {res2011_perc.values.std()*100:.2f}%"
-)
-print(
-    f"The mean annual accumulation for 2011 results are "
-    f"{Maccum_2011.values.mean():.0f} mm/yr for PAIPR " 
-    f"and {man2011_accum.values.mean():.0f} mm/yr "
-    f"for manual results."
-)
-print(
-    f"The mean standard deviations of the annual "
-    f"accumulation estimates are {(man2011_std/man2011_accum).values.mean()*100:.2f}% " 
-    f"for 2011 manual layers and "
-    f"{(Mstd_2011/Maccum_2011).values.mean()*100:.2f}% "
-    f"for 2011 PAIPR layers."
-)
+res2011_perc = 100*(res_2011 / accum_bar)
 
 # %%
 
 def plot_TScomp(
     ts_df1, ts_df2, gdf_combo, labels, 
-    colors=['blue', 'red']):
+    colors=['blue', 'red'], ts_err1=None, ts_err2=None):
     """This is a function to generate matplotlib objects that compare spatially overlapping accumulation time series.
 
     Args:
@@ -479,65 +430,87 @@ def plot_TScomp(
         gdf_combo (geopandas.geoDataFrame): Geodataframe with entries corresponding to the paired time series locations. Also contains a column 'Site' that groups the different time series according to their manual tracing location.
         labels (list of str): The labels used in the output plot to differentiate the time series dataframes.
         colors (list, optional): The colors to use when plotting the time series. Defaults to ['blue', 'red'].
+        ts_err1 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df1. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
+        ts_err2 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df2. If "None" then the error is estimated from the standard deviations in annual results.. Defaults to None.
+
+    Returns:
+        matplotlib.pyplot.figure: Generated figure comparing the two overlapping time series.
     """
+
+    # Remove observations without an assigned site
     site_list = np.unique(gdf_combo['Site']).tolist()
     if "Null" in site_list:
         site_list.remove("Null")
 
+    # Generate figure with a row for each site
     fig, axes = plt.subplots(
         ncols=1, nrows=len(site_list), 
         constrained_layout=True, 
         figsize=(6,24))
 
     for i, site in enumerate(site_list):
-
+        
+        # Subset results to specific site
         idx = np.flatnonzero(gdf_combo['Site']==site)
         df1 = ts_df1.iloc[:,idx]
         df2 = ts_df2.iloc[:,idx]
-        # fig, ax = plt.subplots()
-    
-        df1.mean(axis=1).plot(ax=axes[i], color=colors[0], 
-            linewidth=2, label=labels[0])
-        (df1.mean(axis=1)+df1.std(axis=1)).plot(
-            ax=axes[i], color=colors[0], linestyle='--', 
-            label='__nolegend__')
-        (df1.mean(axis=1)-df1.std(axis=1)).plot(
-            ax=axes[i], color=colors[0], linestyle='--', 
-            label='__nolegend__')
 
-        df2.mean(axis=1).plot(
-            ax=axes[i], color=colors[1], linewidth=2, 
-            label=labels[1])
-        (df2.mean(axis=1)+df2.std(axis=1)).plot(
-            ax=axes[i], color=colors[1], linestyle='--', 
-            label='__nolegend__')
-        (df2.mean(axis=1)-df2.std(axis=1)).plot(
-            ax=axes[i], color=colors[1], linestyle='--', 
-            label='__nolegend__')
+        # Check if errors for time series 1 are provided
+        if ts_err1 is not None:
+
+            df_err1 = ts_err1.iloc[:,idx]
+
+            # Plot ts1 and mean errors
+            df1.mean(axis=1).plot(ax=axes[i], color=colors[0], 
+                linewidth=2, label=labels[0])
+            (df1.mean(axis=1)+df_err1.mean(axis=1)).plot(
+                ax=axes[i], color=colors[0], linestyle='--', 
+                label='__nolegend__')
+            (df1.mean(axis=1)-df_err1.mean(axis=1)).plot(
+                ax=axes[i], color=colors[0], linestyle='--', 
+                label='__nolegend__')
+        else:
+            # If ts1 errors are not given, estimate as the 
+            # standard deviation of annual estimates
+            df1.mean(axis=1).plot(ax=axes[i], color=colors[0], 
+                linewidth=2, label=labels[0])
+            (df1.mean(axis=1)+df1.std(axis=1)).plot(
+                ax=axes[i], color=colors[0], linestyle='--', 
+                label='__nolegend__')
+            (df1.mean(axis=1)-df1.std(axis=1)).plot(
+                ax=axes[i], color=colors[0], linestyle='--', 
+                label='__nolegend__')
+
+        # Check if errors for time series 2 are provided
+        if ts_err2 is not None:
+            df_err2 = ts_err2.iloc[:,idx]
+
+            # Plot ts2 and mean errors
+            df2.mean(axis=1).plot(
+                ax=axes[i], color=colors[1], linewidth=2, 
+                label=labels[1])
+            (df2.mean(axis=1)+df_err2.mean(axis=1)).plot(
+                ax=axes[i], color=colors[1], linestyle='--', 
+                label='__nolegend__')
+            (df2.mean(axis=1)-df_err2.mean(axis=1)).plot(
+                ax=axes[i], color=colors[1], linestyle='--', 
+                label='__nolegend__')
+        else:
+            # If ts2 errors are not given, estimate as the 
+            # standard deviation of annual estimates
+            df2.mean(axis=1).plot(
+                ax=axes[i], color=colors[1], linewidth=2, 
+                label=labels[1])
+            (df2.mean(axis=1)+df2.std(axis=1)).plot(
+                ax=axes[i], color=colors[1], linestyle='--', 
+                label='__nolegend__')
+            (df2.mean(axis=1)-df2.std(axis=1)).plot(
+                ax=axes[i], color=colors[1], linestyle='--', 
+                label='__nolegend__')
+        
+        # Add legend and set title based on site name
         axes[i].legend()
         axes[i].set_title('Site '+site+' time series')
-
-        # df1.mean(axis=1).plot(ax=ax, color=colors[0], 
-        #     linewidth=2, label=labels[0])
-        # (df1.mean(axis=1)+df1.std(axis=1)).plot(
-        #     ax=ax, color=colors[0], linestyle='--', 
-        #     label='__nolegend__')
-        # (df1.mean(axis=1)-df1.std(axis=1)).plot(
-        #     ax=ax, color=colors[0], linestyle='--', 
-        #     label='__nolegend__')
-
-        # df2.mean(axis=1).plot(
-        #     ax=ax, color=colors[1], linewidth=2, 
-        #     label=labels[1])
-        # (df2.mean(axis=1)+df2.std(axis=1)).plot(
-        #     ax=ax, color=colors[1], linestyle='--', 
-        #     label='__nolegend__')
-        # (df2.mean(axis=1)-df2.std(axis=1)).plot(
-        #     ax=ax, color=colors[1], linestyle='--', 
-        #     label='__nolegend__')
-        # ax.legend()
-        # fig.suptitle(site+' time series')
-        # fig.show()
 
     return fig
 
@@ -561,7 +534,8 @@ for label in chunk_centers['Site']:
 
 tsfig_2011 = plot_TScomp(
     man2011_accum, Maccum_2011, gdf_traces2011, 
-    labels=['2011 manual', '2011 PAIPR'])
+    labels=['2011 manual', '2011 PAIPR'], 
+    ts_err1=man2011_std)
 
 # %%
 
@@ -657,31 +631,7 @@ res_2016 = pd.DataFrame(
 accum_bar = np.mean(
     [Maccum_2016.mean(axis=0), 
     man2016_accum.mean(axis=0)], axis=0)
-res2016_perc = res_2016 / accum_bar
-
-sns.kdeplot(res2016_perc.values.reshape(res_2016.size))
-
-print(
-    f"The mean bias between manually-traced and "
-    f"PAIPR-derived accumulation for 2016 is "
-    f"{res_2016.values.mean():.2f} mm/yr ("
-    f"{res2016_perc.values.mean()*100:.2f}% of mean accum) "
-    f"with a RMSE of {res2016_perc.values.std()*100:.2f}%."
-)
-print(
-    f"The mean annual accumulation for 2016 results are "
-    f"{Maccum_2016.values.mean():.0f} mm/yr for PAIPR " 
-    f"and {man2016_accum.values.mean():.0f} mm/yr "
-    f"for manual results."
-)
-print(
-    f"The mean standard deviations of the annual "
-    f"accumulation estimates are "
-    f"{(man2016_std/man2016_accum).values.mean()*100:.2f}% " 
-    f"for 2016 manual layers and "
-    f"{(Mstd_2016/Maccum_2016).values.mean()*100:.2f}% "
-    f"for 2016 PAIPR layers."
-)
+res2016_perc = 100*(res_2016 / accum_bar)
 
 # %% 2016 comparison plots
 
@@ -703,7 +653,8 @@ for label in chunk_centers['Site']:
 
 tsfig_2016 = plot_TScomp(
     man2016_accum, Maccum_2016, gdf_traces2016, 
-    labels=['2016 manual', '2016 PAIPR'])
+    labels=['2016 manual', '2016 PAIPR'], 
+    ts_err1=man2016_std)
 
 # %%
 
@@ -765,7 +716,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     width=600, height=600, fontscale=1.75)
 
 PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
-PM_1to1_comb_plt
+# PM_1to1_comb_plt
 
 # %%[markdown]
 # ## Manual repeatability tests
@@ -860,24 +811,7 @@ man_res = pd.DataFrame(
 accum_bar = np.mean(
     [accum_man2011.mean(axis=0).values, 
     accum_man2016.mean(axis=0).values], axis=0)
-man_res_perc = man_res / accum_bar
-
-
-sns.kdeplot(man_res_perc.values.reshape(man_res.size))
-
-print(
-    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
-    f"{man_res.values.mean():.1f} mm/yr ("
-    f"{man_res_perc.values.mean()*100:.2f}% of mean accum) "
-    f"with a RMSE of {man_res_perc.values.std()*100:.2f}%."
-)
-print(
-    f"The mean annual accumulation for manual results are "
-    f"{accum_man2011.values.mean():.0f} mm/yr for 2011 " 
-    f"and {accum_man2016.values.mean():.0f} mm/yr for 2016"
-)
-print(
-    f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
+man_res_perc = 100*(man_res / accum_bar)
 
 # %% Repeat stats with SEAT10-4 removed
 
@@ -894,24 +828,7 @@ res_tmp = pd.DataFrame(
 bar_tmp = np.mean(
     [accum_tmp2011.mean(axis=0).values, 
     accum_tmp2016.mean(axis=0).values], axis=0)
-res_perc_tmp = res_tmp / bar_tmp
-
-
-sns.kdeplot(res_perc_tmp.values.reshape(res_tmp.size))
-
-print(
-    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
-    f"{res_tmp.values.mean():.1f} mm/yr ("
-    f"{res_perc_tmp.values.mean()*100:.2f}% of mean accum) "
-    f"with a RMSE of {res_perc_tmp.values.std()*100:.2f}%."
-)
-print(
-    f"The mean annual accumulation for manual results are "
-    f"{accum_tmp2011.values.mean():.0f} mm/yr for 2011 " 
-    f"and {accum_tmp2016.values.mean():.0f} mm/yr for 2016"
-)
-print(
-    f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
+res_perc_tmp = 100*(res_tmp / bar_tmp)
 
 # %%
 
@@ -965,7 +882,13 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     width=600, height=600, fontscale=1.75)
 
 man_1to1_comb_plt = man_1to1_plt + site_res_plt
-man_1to1_comb_plt
+# man_1to1_comb_plt
+
+# %%
+
+tsfig_PAIPR = plot_TScomp(
+    accum_2011, accum_2016, gdf_PAIPR, 
+    labels=['2011 PAIPR', '2016 PAIPR'])
 
 # %%[markdown]
 # ## Final figures used in article
@@ -979,6 +902,128 @@ data_map = (
 )
 
 data_map.opts(fontscale=2.5, width=1200, height=1200)
+
+# %% Density plots
+
+plt.rcParams.update({'font.size': 22})
+fig = plt.figure(figsize=(12,8))
+
+ax1 = fig.add_subplot()
+sns.kdeplot(
+    ax=ax1, 
+    data=resPAIPR_perc.values.reshape(resPAIPR_perc.size), 
+    label='2016-2011 PAIPR', linewidth=3)
+ax2 = fig.add_subplot()
+sns.kdeplot(
+    ax=ax2, 
+    data=res2011_perc.values.reshape(res2011_perc.size), 
+    label='2011 PAIPR-manual', linewidth=3)   
+ax3 = fig.add_subplot()
+sns.kdeplot(
+    ax=ax3, 
+    data=res2016_perc.values.reshape(res2016_perc.size), 
+    label='2016 PAIPR-manual', linewidth=3)
+ax4 = fig.add_subplot()
+sns.kdeplot(
+    ax=ax4, 
+    data=man_res_perc.values.reshape(man_res_perc.size), 
+    label='2016-2011 manual', linewidth=3)
+ax1.legend()
+ax1.set_xlabel('Residual (% of mean annual accum)')
+
+# %%
+
+print(
+    f"The mean bias between PAIPR-derived results "
+    f"between 2016 and 2011 flights is "
+    f"{res_PAIPR.values.mean():.1f} mm/yr ("
+    f"{resPAIPR_perc.values.mean():.2f}% of mean accum) "
+    f"with a RMSE of {resPAIPR_perc.values.std():.2f}%."
+)
+print(
+    f"The mean annual accumulation for PAIPR results are "
+    f"{accum_2011.values.mean():.0f} mm/yr for 2011 " 
+    f"and {accum_2016.values.mean():.0f} mm/yr for 2016"
+)
+print(
+    f"The mean standard deviations of the annual "
+    f"accumulation estimates are "
+    f"{(std_2011.values/accum_2011.values).mean()*100:.2f}% " 
+    f"for the 2011 flight and "
+    f"{(std_2016.values/accum_2016.values).mean()*100:.2f}% "
+    f"for the 2016 flight."
+)
+
+print(
+    f"The mean bias between manually-traced and "
+    f"PAIPR-derived accumulation for 2011 is "
+    f"{res_2011.values.mean():.2f} mm/yr ("
+    f"{res2011_perc.values.mean():.2f}% of the mean accumulation) "
+    f"with a RMSE of {res2011_perc.values.std():.2f}%"
+)
+print(
+    f"The mean annual accumulation for 2011 results are "
+    f"{Maccum_2011.values.mean():.0f} mm/yr for PAIPR " 
+    f"and {man2011_accum.values.mean():.0f} mm/yr "
+    f"for manual results."
+)
+print(
+    f"The mean standard deviations of the annual "
+    f"accumulation estimates are {(man2011_std/man2011_accum).values.mean()*100:.2f}% " 
+    f"for 2011 manual layers and "
+    f"{(Mstd_2011/Maccum_2011).values.mean()*100:.2f}% "
+    f"for 2011 PAIPR layers."
+)
+
+print(
+    f"The mean bias between manually-traced and "
+    f"PAIPR-derived accumulation for 2016 is "
+    f"{res_2016.values.mean():.2f} mm/yr ("
+    f"{res2016_perc.values.mean():.2f}% of mean accum) "
+    f"with a RMSE of {res2016_perc.values.std():.2f}%."
+)
+print(
+    f"The mean annual accumulation for 2016 results are "
+    f"{Maccum_2016.values.mean():.0f} mm/yr for PAIPR " 
+    f"and {man2016_accum.values.mean():.0f} mm/yr "
+    f"for manual results."
+)
+print(
+    f"The mean standard deviations of the annual "
+    f"accumulation estimates are "
+    f"{(man2016_std/man2016_accum).values.mean()*100:.2f}% " 
+    f"for 2016 manual layers and "
+    f"{(Mstd_2016/Maccum_2016).values.mean()*100:.2f}% "
+    f"for 2016 PAIPR layers."
+)
+
+print(
+    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
+    f"{man_res.values.mean():.1f} mm/yr ("
+    f"{man_res_perc.values.mean():.2f}% of mean accum) "
+    f"with a RMSE of {man_res_perc.values.std():.2f}%."
+)
+print(
+    f"The mean annual accumulation for manual results are "
+    f"{accum_man2011.values.mean():.0f} mm/yr for 2011 " 
+    f"and {accum_man2016.values.mean():.0f} mm/yr for 2016"
+)
+print(
+    f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
+
+print(
+    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
+    f"{res_tmp.values.mean():.1f} mm/yr ("
+    f"{res_perc_tmp.values.mean():.2f}% of mean accum) "
+    f"with a RMSE of {res_perc_tmp.values.std():.2f}%."
+)
+print(
+    f"The mean annual accumulation for manual results are "
+    f"{accum_tmp2011.values.mean():.0f} mm/yr for 2011 " 
+    f"and {accum_tmp2016.values.mean():.0f} mm/yr for 2016"
+)
+print(
+    f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
 
 # %%
 
@@ -995,24 +1040,18 @@ results_plt
 
 # %%
 
-tsfig_PAIPR = plot_TScomp(
-    accum_2011, accum_2016, gdf_PAIPR, 
-    labels=['2011 PAIPR', '2016 PAIPR'])
-
-# %%
-
-tsfig_PAIPR.savefig(
-    fname=ROOT_DIR.joinpath(
-        'docs/Figures/oib-repeat/tsfig_PAIPR.svg'))
-tsfig_manual.savefig(
-    fname=ROOT_DIR.joinpath(
-        'docs/Figures/oib-repeat/tsfig_man.svg'))
-tsfig_2011.savefig(
-    fname=ROOT_DIR.joinpath(
-        'docs/Figures/oib-repeat/tsfig_2011.svg'))
-tsfig_2016.savefig(
-    fname=ROOT_DIR.joinpath(
-        'docs/Figures/oib-repeat/tsfig_2016.svg'))
+# tsfig_PAIPR.savefig(
+#     fname=ROOT_DIR.joinpath(
+#         'docs/Figures/oib-repeat/tsfig_PAIPR.svg'))
+# tsfig_manual.savefig(
+#     fname=ROOT_DIR.joinpath(
+#         'docs/Figures/oib-repeat/tsfig_man.svg'))
+# tsfig_2011.savefig(
+#     fname=ROOT_DIR.joinpath(
+#         'docs/Figures/oib-repeat/tsfig_2011.svg'))
+# tsfig_2016.savefig(
+#     fname=ROOT_DIR.joinpath(
+#         'docs/Figures/oib-repeat/tsfig_2016.svg'))
 
 # %%
 
@@ -1057,31 +1096,5 @@ hv.save(data_map, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/data_map.png'))
 hv.save(results_plt, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/results.png'))
-
-# %%
-
-# fig, ax = plt.subplots()
-# res_PAIPR.mean(axis=1).plot(
-#     ax=ax, label='PAIPR', color='blue')
-# (res_PAIPR.mean(axis=1)+res_PAIPR.std(axis=1)).plot(
-#     ax=ax, label='__none__', color='blue', linestyle='--')
-# (res_PAIPR.mean(axis=1)-res_PAIPR.std(axis=1)).plot(
-#     ax=ax, label='__none__', color='blue', linestyle='--')
-# man_res.mean(axis=1).plot(
-#     ax=ax, label='manual', color='orange')
-# (man_res.mean(axis=1)+man_res.std(axis=1)).plot(
-#     ax=ax, label='__none__', color='orange', linestyle='--')
-# (man_res.mean(axis=1)-man_res.std(axis=1)).plot(
-#     ax=ax, label='__none__', color='orange', linestyle='--')
-# res_tmp.mean(axis=1).plot(
-#     ax=ax, label='man-correct', color='green')
-# (res_tmp.mean(axis=1)+res_tmp.std(axis=1)).plot(
-#     ax=ax, label='__none__', color='green', linestyle='--')
-# (res_tmp.mean(axis=1)-res_tmp.std(axis=1)).plot(
-#     ax=ax, label='__none__', color='green', linestyle='--')
-# # res_2011.mean(axis=1).plot(ax=ax, label='2011', color='red')
-# # res_2016.mean(axis=1).plot(ax=ax, label='2016', color='purple')
-# ax.legend()
-# fig.show()
 
 # %%
