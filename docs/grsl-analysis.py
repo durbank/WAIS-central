@@ -187,17 +187,6 @@ plt_labels = hv.Labels(
 #     * (plt_accum2011 * plt_accum2016) * plt_labels
 # )
 
-# %% Experiments with matplotlib backend
-
-# plt_accum2011 = gv.Points(
-#     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
-#         projection=ANT_proj, color='accum', 
-#         cmap='viridis', colorbar=True, s=3)
-
-# fig = hv.render(plt_accum2011, backend='matplotlib')
-# fig.set_size_inches((10,10))
-
-
 # %% PAIPR residuals
 
 # Calculate residuals (as % bias of mean accumulation)
@@ -283,16 +272,6 @@ PAIPR_df['res_perc'] = (
 one_to_one = hv.Curve(
     data=pd.DataFrame(
         {'x':[100,750], 'y':[100,750]}))
-# scatt_yr = hv.Points(
-#     data=PAIPR_df, 
-#     kdims=['accum_2011', 'accum_2016'], 
-#     vdims=['Year']).groupby('Year')
-# (
-#     one_to_one.opts(color='black') 
-#     * scatt_yr.opts(
-#         xlim=(100,750), ylim=(100,750), 
-#         xlabel='2011 flight (mm/yr)', 
-#         ylabel='2016 flight (mm/yr)'))
 
 scatt_yr = hv.Points(
     data=PAIPR_df, 
@@ -322,36 +301,6 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
 
 paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 # paipr_1to1_plt_comb
-
-# %%
-
-# import random as rnd
-
-# # Diagnostic plots
-# plt_idxs = rnd.sample(range(accum_2011.shape[1]), 6)
-# for i, idx in enumerate(plt_idxs):
-#     fig, ax = plt.subplots()
-#     accum_2011.iloc[:,idx].plot(
-#         ax=ax, color='blue', linewidth=2, 
-#         label='2011 flight')
-#     (accum_2011.iloc[:,idx]+std_2011.iloc[:,idx]).plot(
-#         ax=ax, color='blue', linestyle='--', 
-#         label='__nolegend__')
-#     (accum_2011.iloc[:,idx]-std_2011.iloc[:,idx]).plot(
-#         ax=ax, color='blue', linestyle='--', 
-#         label='__nolegend__')
-#     accum_2016.iloc[:,idx].plot(
-#         ax=ax, color='red', linewidth=2, 
-#         label='2016 flight')
-#     (accum_2016.iloc[:,idx]+std_2016.iloc[:,idx]).plot(
-#         ax=ax, color='red', linestyle='--', 
-#         label='__nolegend__')
-#     (accum_2016.iloc[:,idx]-std_2016.iloc[:,idx]).plot(
-#         ax=ax, color='red', linestyle='--', 
-#         label='__nolegend__')
-#     ax.legend()
-#     fig.suptitle('PAIPR time series Example '+(str(i+1)))
-#     fig.show()
 
 # %%[markdown]
 # ## 2011 PAIPR-manual comparions
@@ -947,15 +896,6 @@ data_map = (
     * plt_labels.opts(text_font_size='32pt')
 )
 
-
-# import cartopy.feature as cf
-# graticules = cf.NaturalEarthFeature(
-#     category='physical',
-#     name='graticules_30',
-#     scale='110m')
-# map_grat = gv.Feature(graticules, group='Lines').opts(
-#     projection=ANT_proj)
-
 data_map = data_map.opts(fontscale=2.5, width=1200, height=1200)
 
 
@@ -1000,35 +940,6 @@ sns.kdeplot(
     label='2016-2011 manual', linewidth=4, color='#009e73')
 ax1.legend()
 ax1.set_xlabel('% Bias')
-
-# %% Density plots
-
-# plt.rcParams.update({'font.size': 22})
-# kde_fig = plt.figure(figsize=(12,8))
-
-# ax1 = kde_fig.add_subplot()
-# ax1.axvline(color='black', linestyle='--')
-# sns.kdeplot(
-#     ax=ax1, 
-#     data=resPAIPR_perc.values.reshape(resPAIPR_perc.size), 
-#     label='2016-2011 PAIPR', linewidth=4, color='#d55e00')
-# ax2 = kde_fig.add_subplot()
-# sns.kdeplot(
-#     ax=ax2, 
-#     data=res2011_perc.values.reshape(res2011_perc.size), 
-#     label='2011 PAIPR-manual', linewidth=4, color='#cc79a7')   
-# ax3 = kde_fig.add_subplot()
-# sns.kdeplot(
-#     ax=ax3, 
-#     data=res2016_perc.values.reshape(res2016_perc.size), 
-#     label='2016 PAIPR-manual', linewidth=4, color='#0072b2')
-# ax4 = kde_fig.add_subplot()
-# sns.kdeplot(
-#     ax=ax4, 
-#     data=man_res_perc.values.reshape(man_res_perc.size), 
-#     label='2016-2011 manual', linewidth=4, color='#009e73')
-# ax1.legend()
-# ax1.set_xlabel('% Bias')
 
 # %%
 
@@ -1213,31 +1124,32 @@ print(
 # %%
 
 def panels_121(
-    datum_1, datum_2, 
-    xlabels=None, ylabels=None,
-    # xlabels=[
-    #     '2011 PAIPR (mm/yr)', '2011 manual (mm/yr)', 
-    #     '2011 PAIPR (mm/yr)', '2016 PAIPR (mm/yr)'], 
-    # ylabels=[
-    # '2016 PAIPR (mm/yr)', '2016 manual (mm/yr)', 
-    # '2011 manual (mm/yr', '2016 manual (mm/yr)'],
-    TOP=False, BOTTOM=False,
-    kde_colors=['#d55e00', '#cc79a7', '#0072b2', '#009e73'], 
+    datum, 
+    x_vars=[
+        'accum_2011','accum_2011','accum_man','accum_man'],
+    y_vars=[
+        'accum_2016','accum_2016','accum_paipr','accum_paipr'],
+    TOP=False, BOTTOM=False, xlabels=None, ylabels=None, 
+    kde_colors=['#d55e00', '#cc79a7', '#0072b2', '#009e73'],
     kde_labels=[
         '2016-2011 PAIPR', '2016-2011 manual', 
         '2011 PAIPR-manual', '2016 PAIPR-manual'], 
     plot_min=None, plot_max=None, size=500):
-    
-    """A function to generate a Holoviews Layout consisting of 1:1 plots of the given datum, with a kernel density plot also showing the residuals between datum-1 and datum-2.
+    """A function to generate a Holoviews Layout consisting of 1:1 plots of the given datum, with a kernel density plot also showing the residuals between the given x and y variables.
 
     Args:
-        datum_1 (list of pandas.DataFrames): Data to be included on the x-axis of 1:1 plots.
-        datum_2 (list of pandas.DataFrames): Data to be included on the y-axis of 1:1 plots.
-        xlabels (list, optional): List of strings to use as the x-labels for the 1:1 plots. Defaults to None.
+        datum (list of pandas.DataFrame): First data group to include for generating plots. Variables in dataframe must include an x-variable, a y-variable, and a 'Year' variable.
+        x_vars (list of str, optional): The names of the x-variables included in the datum. Defaults to [ 'accum_2011','accum_2011','accum_man','accum_man'].
+        y_vars (list of str, optional): The names of the y-variables included in the datum.. Defaults to [ 'accum_2016','accum_2016','accum_paipr','accum_paipr'].
+        TOP (bool, optional): Whether the returned Layout will be at the top of a Layout stack. Defaults to False.
+        BOTTOM (bool, optional): Whether the returned Layout will be at the bottom of a Layout stack. Defaults to False.
+        xlabels ([type], optional): List of strings to use as the x-labels for the 1:1 plots. Defaults to None.
         ylabels (list, optional): List of strings to use as the y-labels for the 1:1 plots. Defaults to None.
         kde_colors (list, optional): List of colors to use in kde plots. Defaults to ['blue', 'red', 'purple', 'orange'].
         kde_labels (list, optional): List of labels to use in kde plots. Defaults to [ '2016-2011 PAIPR', '2016-2011 manual', '2011 PAIPR-manual', '2016 PAIPR-manual'].
-        size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 600.
+        plot_min (float, optional): Specify a lower bound to the generated plots. Defaults to None.
+        plot_max (float, optional): Specifies an upper bound to the generated plots. Defaults to None.
+        size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 500.
 
     Returns:
         holoviews.core.layout.Layout: Figure Layout consisting of multiple 1:1 subplots and a subplot with kernel density estimates of the residuals of the various datum.
@@ -1247,41 +1159,30 @@ def panels_121(
     one2one_plts = []
     kde_plots = []
     if xlabels is None:
-        xlabels = np.repeat(None, len(datum_1))
+        xlabels = np.repeat(None, len(datum))
     if ylabels is None:
-        ylabels = np.repeat(None, len(datum_1))
+        ylabels = np.repeat(None, len(datum))
 
-    # Iterate through different input data
-    for i, data1 in enumerate(datum_1):
+    for i, data in enumerate(datum):
 
-        # Generate DataFrame of inputs in long tidy format
-        long_df = pd.DataFrame(
-            {'Trace': np.tile(
-                np.arange(0,data1.shape[1]), 
-                data1.shape[0]), 
-            'Year': np.reshape(
-                np.repeat(data1.index, data1.shape[1]), 
-                data1.size), 
-            'Accum_x': np.reshape(
-                data1.values, data1.size), 
-            'Accum_y': np.reshape(
-                datum_2[i].values, datum_2[i].size)
-        })
-    
+        # Get names of x-y variables for plotting
+        x_var = x_vars[i]
+        y_var = y_vars[i]
+
         # Get global axis bounds and generate 1:1 line
         if plot_min is None:
             plot_min = np.min(
-                [long_df['Accum_x'].min(), long_df['Accum_y'].min()])
+                [data[x_var].min(), data[y_var].min()])
         if plot_max is None:
             plot_max = np.max(
-                [long_df['Accum_x'].max(), long_df['Accum_y'].max()])
+                [data[x_var].max(), data[y_var].max()])
         one2one_line = hv.Curve(data=pd.DataFrame(
             {'x':[plot_min, plot_max], 
             'y':[plot_min, plot_max]})).opts(color='black')
 
         # Generate 1:1 scatter plot, gradated by year
         scatt_yr = hv.Points(
-            data=long_df, kdims=['Accum_x', 'Accum_y'], 
+            data=data, kdims=[x_var, y_var], 
             vdims=['Year']).opts(
                 xlim=(plot_min, plot_max), 
                 ylim=(plot_min, plot_max), 
@@ -1295,7 +1196,7 @@ def panels_121(
         if i==0:
             scatt_yr.opts(yaxis='left')
             # scatt_yr.opts(ylabel='Annual accum (mm/yr)')
-        if i==len(datum_1)-1:
+        if i==len(datum)-1:
             scatt_yr.opts(colorbar=True)
         if TOP:
             scatt_yr.opts(xaxis='top')
@@ -1310,8 +1211,8 @@ def panels_121(
         # Generate kde for residuals of given estimates and 
         # add to plot list 
         kde_data = (
-            100*(long_df['Accum_y']-long_df['Accum_x']) 
-            / long_df[['Accum_x', 'Accum_y']].mean(axis=1))
+            100*(data[y_var]-data[x_var]) 
+            / data[[x_var, y_var]].mean(axis=1))
         kde_plot = hv.Distribution(
             kde_data, label=kde_labels[i]).opts(
             filled=False, line_color=kde_colors[i])
@@ -1348,14 +1249,8 @@ figs_supp2 = []
 # Add full dataset Layout to Layout list
 figs_supp2.append(
     panels_121(
-        datum_1=[
-            accum_2011, accum_man2011, 
-            Maccum_2011, Maccum_2016], 
-        datum_2=[
-            accum_2016, accum_man2016, 
-            man2011_accum, man2016_accum], 
-        plot_min=80, plot_max=820, 
-        TOP=True))
+        datum=[PAIPR_df, man_df, df_2011, df_2016],
+        plot_min=80, plot_max=820, TOP=True))
 
 # Get list of unique sites in data
 site_list = np.unique(gdf_PAIPR['Site']).tolist()
@@ -1364,34 +1259,22 @@ site_list.remove("Null")
 # Iterate through sites
 for i, site in enumerate(site_list):
 
-    # Get indices of current site in the given datasets
-    PAIPR_idx = np.flatnonzero(gdf_PAIPR['Site']==site)
-    MAN_idx = np.flatnonzero(gdf_MANtraces['Site']==site)
-    traces2011_idx = np.flatnonzero(gdf_traces2011['Site']==site)
-    traces2016_idx = np.flatnonzero(gdf_traces2016['Site']==site)
+    paipr_i = PAIPR_df.query("Site == @site")
+    man_i = man_df.query("Site == @site")
+    df2011_i = df_2011.query("Site == @site")
+    df2016_i = df_2016.query("Site == @site")
 
-    # Subset datum to current site
-    data1 = [
-        accum_2011.iloc[:,PAIPR_idx], 
-        accum_man2011.iloc[:,MAN_idx], 
-        Maccum_2011.iloc[:,traces2011_idx], 
-        Maccum_2016.iloc[:,traces2016_idx]]
-    data2 = [
-        accum_2016.iloc[:,PAIPR_idx], 
-        accum_man2016.iloc[:,MAN_idx], 
-        man2011_accum.iloc[:,traces2011_idx], 
-        man2016_accum.iloc[:,traces2016_idx]]
+    data_i = [paipr_i, man_i, df2011_i, df2016_i]
 
     # Generate panel figures for current site and add 
     # to figure list
     if i==(len(site_list)-1):
         figs_supp2.append(panels_121(
-            datum_1=data1, datum_2=data2, 
-            plot_min=80, plot_max=820, BOTTOM=True))
+            datum=data_i,  plot_min=80, 
+            plot_max=820, BOTTOM=True))
     else:
         figs_supp2.append(panels_121(
-            datum_1=data1, datum_2=data2, 
-            plot_min=80, plot_max=820))
+            datum=data_i, plot_min=80, plot_max=820))
 
 # Combine individual site panels to final Supplementary figure
 fig_supp2 = hv.Layout(
