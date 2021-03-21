@@ -16,6 +16,7 @@ from shapely.geometry import Point
 output_notebook()
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
+import panel as pn
 import seaborn as sns
 
 # Define plotting projection to use
@@ -108,15 +109,17 @@ gdf_PAIPR['accum_res'] = (
     (gdf_PAIPR.accum_2016 - gdf_PAIPR.accum_2011) 
     / gdf_PAIPR.accum_mu)
 
-# Assign flight chunk label based on location
+# Assign flight chunk label based on location 
+# (sorted from high to low accumulation as 
+# determined with 2011 manual results) 
 chunk_centers = gpd.GeoDataFrame({
     'Site': ['A', 'B', 'C', 'D', 'E', 'F'],
     'Name': ['A', 'B', 'C', 'D', 'E', 'F']},
     geometry=gpd.points_from_xy(
-        [-1.177E6, -1.115E6, -1.024E6, -1.093E6, 
-            -1.159E6, -1.263E6], 
-        [-2.898E5, -3.681E5, -4.639E5, -4.639E5, 
-            -4.640E5, -4.668E5]), 
+        [-1.263E6, -1.159E6, -1.177E6, -1.115E6, 
+            -1.093E6, -1.024E6], 
+        [-4.668E5, -4.640E5, -2.898E5, -3.681E5, 
+            -4.639E5, -4.639E5]), 
     crs="EPSG:3031")
 
 # # Assign flight chunk label based on location
@@ -225,7 +228,7 @@ plt_accum = gv.Points(
 
 plt_res = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
-        projection=ANT_proj, color='accum_res', size=2,
+        projection=ANT_proj, color='accum_res', size=3,
         bgcolor='silver', colorbar=True, cmap='coolwarm_r', 
         symmetric=True, tools=['hover'], 
         width=600, height=600, fontsize=1.75)
@@ -270,6 +273,12 @@ PAIPR_df = pd.DataFrame(
         accum_2016.values, accum_2016.size), 
     'std_2016': np.reshape(
         std_2016.values, std_2016.size)})
+
+# Add residuals to dataframe
+PAIPR_df['res_accum'] = PAIPR_df['accum_2016']-PAIPR_df['accum_2011']
+PAIPR_df['res_perc'] = (
+    100*(PAIPR_df['res_accum'])
+    /(PAIPR_df['accum_2016']+PAIPR_df['accum_2011']).mean())
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -419,8 +428,11 @@ res2011_perc = 100*(res_2011 / accum_bar)
 
 # %%
 
+plt.rcParams.update({'font.size': 16})
+
 def plot_TScomp(
     ts_df1, ts_df2, gdf_combo, labels, 
+    yaxis=True, xlims=None, ylims=None,
     colors=['blue', 'red'], ts_err1=None, ts_err2=None):
     """This is a function to generate matplotlib objects that compare spatially overlapping accumulation time series.
 
@@ -431,7 +443,7 @@ def plot_TScomp(
         labels (list of str): The labels used in the output plot to differentiate the time series dataframes.
         colors (list, optional): The colors to use when plotting the time series. Defaults to ['blue', 'red'].
         ts_err1 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df1. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
-        ts_err2 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df2. If "None" then the error is estimated from the standard deviations in annual results.. Defaults to None.
+        ts_err2 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df2. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
 
     Returns:
         matplotlib.pyplot.figure: Generated figure comparing the two overlapping time series.
@@ -508,15 +520,32 @@ def plot_TScomp(
                 ax=axes[i], color=colors[1], linestyle='--', 
                 label='__nolegend__')
         
+        if xlims:
+            axes[i].set_xlim(xlims)
+        if ylims:
+            axes[i].set_ylim(ylims)
+
         # Add legend and set title based on site name
+        axes[i].grid(True)
         axes[i].legend()
-        axes[i].set_title('Site '+site+' time series')
+        # axes[i].set_title('Site '+site+' time series')
+
+        if not yaxis:
+            axes[i].set_yticklabels([])
+        else:
+            axes[i].set_ylabel('Accum (mm/a)')
+
+        if i==(len(site_list)-1):
+            pass
+        else:
+            axes[i].set_xticklabels([])
+            axes[i].set_xlabel(None)
 
     return fig
 
 # %% 2011 comparison plots
 
-# Generate indices of corresponding to desiered sites
+# Generate indices corresponding to desired sites
 gdf_traces2011['Site'] = np.repeat(
     'Null', gdf_traces2011.shape[0])
 for label in chunk_centers['Site']:
@@ -534,6 +563,7 @@ for label in chunk_centers['Site']:
 
 tsfig_2011 = plot_TScomp(
     man2011_accum, Maccum_2011, gdf_traces2011, 
+    yaxis=False, xlims=[1990, 2010], ylims=[80, 700],
     labels=['2011 manual', '2011 PAIPR'], 
     ts_err1=man2011_std)
 
@@ -653,6 +683,7 @@ for label in chunk_centers['Site']:
 
 tsfig_2016 = plot_TScomp(
     man2016_accum, Maccum_2016, gdf_traces2016, 
+    yaxis=False, xlims=[1990,2010], ylims=[80,700],
     labels=['2016 manual', '2016 PAIPR'], 
     ts_err1=man2016_std)
 
@@ -682,6 +713,12 @@ tmp_df2 = pd.DataFrame(
 tmp_df2['flight'] = 2016
 
 PAP_man_df = pd.concat([tmp_df1, tmp_df2], axis=0)
+
+# Add residuals to dataframe
+PAP_man_df['res_accum'] = PAP_man_df['accum_paipr']-PAP_man_df['accum_man']
+PAP_man_df['res_perc'] = (
+    100*(PAP_man_df['res_accum'])
+    /(PAP_man_df['accum_paipr']+PAP_man_df['accum_man']).mean())
 
 # %%
 
@@ -800,6 +837,7 @@ for label in chunk_centers['Site']:
 
 tsfig_manual = plot_TScomp(
     accum_man2011, accum_man2016, gdf_MANtraces, 
+    yaxis=False, xlims=[1990,2010], ylims=[80,700],
     labels=['2011 manual', '2016 manual'])
 
 # %% 
@@ -816,9 +854,9 @@ man_res_perc = 100*(man_res / accum_bar)
 # %% Repeat stats with SEAT10-4 removed
 
 # Remove Site E (SEAT2010-4) from comparisons
-idx_tmp2011 = gdf_MANtraces.query('Site != "E"')['ID_2011']
+idx_tmp2011 = gdf_MANtraces.query('Site != "B"')['ID_2011']
 accum_tmp2011 = man2011_ALL.iloc[:,idx_tmp2011]
-idx_tmp2016 = gdf_MANtraces.query('Site != "E"')['ID_2016']
+idx_tmp2016 = gdf_MANtraces.query('Site != "B"')['ID_2016']
 accum_tmp2016 = man2016_ALL.iloc[:,idx_tmp2016]
 
 # Calculate residuals (as % bias of mean accumulation)
@@ -851,6 +889,12 @@ man_df = pd.DataFrame(
         accum_man2016.values, accum_man2016.size), 
     'std_2016': np.reshape(
         std_man2016.values, std_man2016.size)})
+
+# Add residuals to dataframe
+man_df['res_accum'] = man_df['accum_2016']-man_df['accum_2011']
+man_df['res_perc'] = (
+    100*(man_df['res_accum'])
+    /(man_df['accum_2016']+man_df['accum_2011']).mean())
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -888,7 +932,9 @@ man_1to1_comb_plt = man_1to1_plt + site_res_plt
 
 tsfig_PAIPR = plot_TScomp(
     accum_2011, accum_2016, gdf_PAIPR, 
-    labels=['2011 PAIPR', '2016 PAIPR'])
+    yaxis=True, xlims=[1990,2010], ylims=[80,700],
+    labels=['2011 PAIPR', '2016 PAIPR'], 
+    ts_err1=std_2011, ts_err2=std_2016)
 
 # %%[markdown]
 # ## Final figures used in article
@@ -901,7 +947,30 @@ data_map = (
     * plt_labels.opts(text_font_size='32pt')
 )
 
+
+# import cartopy.feature as cf
+# graticules = cf.NaturalEarthFeature(
+#     category='physical',
+#     name='graticules_30',
+#     scale='110m')
+# map_grat = gv.Feature(graticules, group='Lines').opts(
+#     projection=ANT_proj)
+
 data_map = data_map.opts(fontscale=2.5, width=1200, height=1200)
+
+
+res_map = plt_manPTS* plt_res * plt_labels.opts(
+    text_font_size='32pt')
+res_map = res_map.opts(fontscale=2.5, width=1200, height=1200)
+
+# %%
+
+PAIPR_df = PAIPR_df.query("Site != 'Null'")
+PAP_man_df = PAP_man_df.query("Site != 'Null'")
+man_df = man_df.query("Site != 'Null'")
+
+df_2011 = PAP_man_df.query('flight==2011')
+df_2016 = PAP_man_df.query('flight==2016')
 
 # %% Density plots
 
@@ -909,145 +978,263 @@ plt.rcParams.update({'font.size': 22})
 kde_fig = plt.figure(figsize=(12,8))
 
 ax1 = kde_fig.add_subplot()
+ax1.axvline(color='black', linestyle='--')
 sns.kdeplot(
     ax=ax1, 
-    data=resPAIPR_perc.values.reshape(resPAIPR_perc.size), 
-    label='2016-2011 PAIPR', linewidth=3)
+    data=PAIPR_df['res_perc'], 
+    label='2016-2011 PAIPR', linewidth=4, color='#d55e00')
 ax2 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax2, 
-    data=res2011_perc.values.reshape(res2011_perc.size), 
-    label='2011 PAIPR-manual', linewidth=3)   
+    data=df_2011['res_perc'], 
+    label='2011 PAIPR-manual', linewidth=4, color='#cc79a7')   
 ax3 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax3, 
-    data=res2016_perc.values.reshape(res2016_perc.size), 
-    label='2016 PAIPR-manual', linewidth=3)
+    data=df_2016['res_perc'], 
+    label='2016 PAIPR-manual', linewidth=4, color='#0072b2')
 ax4 = kde_fig.add_subplot()
 sns.kdeplot(
     ax=ax4, 
-    data=man_res_perc.values.reshape(man_res_perc.size), 
-    label='2016-2011 manual', linewidth=3)
+    data=man_df['res_perc'], 
+    label='2016-2011 manual', linewidth=4, color='#009e73')
 ax1.legend()
-ax1.set_xlabel('Residual (% of mean annual accum)')
+ax1.set_xlabel('% Bias')
+
+# %% Density plots
+
+# plt.rcParams.update({'font.size': 22})
+# kde_fig = plt.figure(figsize=(12,8))
+
+# ax1 = kde_fig.add_subplot()
+# ax1.axvline(color='black', linestyle='--')
+# sns.kdeplot(
+#     ax=ax1, 
+#     data=resPAIPR_perc.values.reshape(resPAIPR_perc.size), 
+#     label='2016-2011 PAIPR', linewidth=4, color='#d55e00')
+# ax2 = kde_fig.add_subplot()
+# sns.kdeplot(
+#     ax=ax2, 
+#     data=res2011_perc.values.reshape(res2011_perc.size), 
+#     label='2011 PAIPR-manual', linewidth=4, color='#cc79a7')   
+# ax3 = kde_fig.add_subplot()
+# sns.kdeplot(
+#     ax=ax3, 
+#     data=res2016_perc.values.reshape(res2016_perc.size), 
+#     label='2016 PAIPR-manual', linewidth=4, color='#0072b2')
+# ax4 = kde_fig.add_subplot()
+# sns.kdeplot(
+#     ax=ax4, 
+#     data=man_res_perc.values.reshape(man_res_perc.size), 
+#     label='2016-2011 manual', linewidth=4, color='#009e73')
+# ax1.legend()
+# ax1.set_xlabel('% Bias')
 
 # %%
 
 print(
     f"The mean bias between PAIPR-derived results "
     f"between 2016 and 2011 flights is "
-    f"{res_PAIPR.values.mean():.1f} mm/yr ("
-    f"{resPAIPR_perc.values.mean():.2f}% of mean accum) "
-    f"with a RMSE of {resPAIPR_perc.values.std():.2f}%."
+    f"{PAIPR_df['res_accum'].mean():.1f} mm/yr ("
+    f"{PAIPR_df['res_perc'].mean():.2f}% of mean accum) "
+    f"with a RMSE of {PAIPR_df['res_perc'].std():.2f}%."
 )
 print(
     f"The mean annual accumulation for PAIPR results are "
-    f"{accum_2011.values.mean():.0f} mm/yr for 2011 " 
-    f"and {accum_2016.values.mean():.0f} mm/yr for 2016"
+    f"{PAIPR_df['accum_2011'].mean():.0f} mm/yr for 2011 " 
+    f"and {PAIPR_df['accum_2016'].mean():.0f} mm/yr for 2016"
 )
 print(
     f"The mean standard deviations of the annual "
     f"accumulation estimates are "
-    f"{(std_2011.values/accum_2011.values).mean()*100:.2f}% " 
+    f"{(100*PAIPR_df['std_2011']/PAIPR_df['accum_2011']).mean():.2f}% " 
     f"for the 2011 flight and "
-    f"{(std_2016.values/accum_2016.values).mean()*100:.2f}% "
+    f"{(100*PAIPR_df['std_2016']/PAIPR_df['accum_2016']).mean():.2f}% "
     f"for the 2016 flight."
 )
 
 print(
     f"The mean bias between manually-traced and "
     f"PAIPR-derived accumulation for 2011 is "
-    f"{res_2011.values.mean():.2f} mm/yr ("
-    f"{res2011_perc.values.mean():.2f}% of the mean accumulation) "
-    f"with a RMSE of {res2011_perc.values.std():.2f}%"
+    f"{df_2011['res_accum'].mean():.2f} mm/yr ("
+    f"{df_2011['res_perc'].mean():.2f}% of the mean accumulation) "
+    f"with a RMSE of {df_2011['res_perc'].std():.2f}%"
 )
 print(
     f"The mean annual accumulation for 2011 results are "
-    f"{Maccum_2011.values.mean():.0f} mm/yr for PAIPR " 
-    f"and {man2011_accum.values.mean():.0f} mm/yr "
+    f"{df_2011['accum_paipr'].mean():.0f} mm/yr for PAIPR " 
+    f"and {df_2011['accum_man'].mean():.0f} mm/yr "
     f"for manual results."
 )
 print(
     f"The mean standard deviations of the annual "
-    f"accumulation estimates are {(man2011_std/man2011_accum).values.mean()*100:.2f}% " 
+    f"accumulation estimates are {(df_2011['std_man']/df_2011['accum_man']).mean()*100:.2f}% " 
     f"for 2011 manual layers and "
-    f"{(Mstd_2011/Maccum_2011).values.mean()*100:.2f}% "
+    f"{(df_2011['std_paipr']/df_2011['accum_paipr']).mean()*100:.2f}% "
     f"for 2011 PAIPR layers."
 )
 
 print(
     f"The mean bias between manually-traced and "
     f"PAIPR-derived accumulation for 2016 is "
-    f"{res_2016.values.mean():.2f} mm/yr ("
-    f"{res2016_perc.values.mean():.2f}% of mean accum) "
-    f"with a RMSE of {res2016_perc.values.std():.2f}%."
+    f"{df_2016['res_accum'].mean():.2f} mm/yr ("
+    f"{df_2016['res_perc'].mean():.2f}% of the mean accumulation) "
+    f"with a RMSE of {df_2016['res_perc'].std():.2f}%"
 )
 print(
     f"The mean annual accumulation for 2016 results are "
-    f"{Maccum_2016.values.mean():.0f} mm/yr for PAIPR " 
-    f"and {man2016_accum.values.mean():.0f} mm/yr "
+    f"{df_2016['accum_paipr'].mean():.0f} mm/yr for PAIPR " 
+    f"and {df_2016['accum_man'].mean():.0f} mm/yr "
     f"for manual results."
 )
 print(
     f"The mean standard deviations of the annual "
-    f"accumulation estimates are "
-    f"{(man2016_std/man2016_accum).values.mean()*100:.2f}% " 
+    f"accumulation estimates are {(df_2016['std_man']/df_2016['accum_man']).mean()*100:.2f}% " 
     f"for 2016 manual layers and "
-    f"{(Mstd_2016/Maccum_2016).values.mean()*100:.2f}% "
+    f"{(df_2016['std_paipr']/df_2016['accum_paipr']).mean()*100:.2f}% "
     f"for 2016 PAIPR layers."
 )
 
 print(
-    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
-    f"{man_res.values.mean():.1f} mm/yr ("
-    f"{man_res_perc.values.mean():.2f}% of mean accum) "
-    f"with a RMSE of {man_res_perc.values.std():.2f}%."
+    f"The mean bias between manually-derived results "
+    f"between 2016 and 2011 flights is "
+    f"{man_df['res_accum'].mean():.1f} mm/yr ("
+    f"{man_df['res_perc'].mean():.2f}% of mean accum) "
+    f"with a RMSE of {man_df['res_perc'].std():.2f}%."
 )
 print(
     f"The mean annual accumulation for manual results are "
-    f"{accum_man2011.values.mean():.0f} mm/yr for 2011 " 
-    f"and {accum_man2016.values.mean():.0f} mm/yr for 2016"
+    f"{man_df['accum_2011'].mean():.0f} mm/yr for 2011 " 
+    f"and {man_df['accum_2016'].mean():.0f} mm/yr for 2016"
 )
 print(
-    f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
+    f"The mean standard deviations of the manual annual "
+    f"accumulation estimates are "
+    f"{(100*man_df['std_2011']/man_df['accum_2011']).mean():.2f}% " 
+    f"for the 2011 flight and "
+    f"{(100*man_df['std_2016']/man_df['accum_2016']).mean():.2f}% "
+    f"for the 2016 flight."
+)
 
-print(
-    f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
-    f"{res_tmp.values.mean():.1f} mm/yr ("
-    f"{res_perc_tmp.values.mean():.2f}% of mean accum) "
-    f"with a RMSE of {res_perc_tmp.values.std():.2f}%."
-)
-print(
-    f"The mean annual accumulation for manual results are "
-    f"{accum_tmp2011.values.mean():.0f} mm/yr for 2011 " 
-    f"and {accum_tmp2016.values.mean():.0f} mm/yr for 2016"
-)
-print(
-    f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
+# %%
+
+# print(
+#     f"The mean bias between PAIPR-derived results "
+#     f"between 2016 and 2011 flights is "
+#     f"{res_PAIPR.values.mean():.1f} mm/yr ("
+#     f"{resPAIPR_perc.values.mean():.2f}% of mean accum) "
+#     f"with a RMSE of {resPAIPR_perc.values.std():.2f}%."
+# )
+# print(
+#     f"The mean annual accumulation for PAIPR results are "
+#     f"{accum_2011.values.mean():.0f} mm/yr for 2011 " 
+#     f"and {accum_2016.values.mean():.0f} mm/yr for 2016"
+# )
+# print(
+#     f"The mean standard deviations of the annual "
+#     f"accumulation estimates are "
+#     f"{(std_2011.values/accum_2011.values).mean()*100:.2f}% " 
+#     f"for the 2011 flight and "
+#     f"{(std_2016.values/accum_2016.values).mean()*100:.2f}% "
+#     f"for the 2016 flight."
+# )
+
+# print(
+#     f"The mean bias between manually-traced and "
+#     f"PAIPR-derived accumulation for 2011 is "
+#     f"{res_2011.values.mean():.2f} mm/yr ("
+#     f"{res2011_perc.values.mean():.2f}% of the mean accumulation) "
+#     f"with a RMSE of {res2011_perc.values.std():.2f}%"
+# )
+# print(
+#     f"The mean annual accumulation for 2011 results are "
+#     f"{Maccum_2011.values.mean():.0f} mm/yr for PAIPR " 
+#     f"and {man2011_accum.values.mean():.0f} mm/yr "
+#     f"for manual results."
+# )
+# print(
+#     f"The mean standard deviations of the annual "
+#     f"accumulation estimates are {(man2011_std/man2011_accum).values.mean()*100:.2f}% " 
+#     f"for 2011 manual layers and "
+#     f"{(Mstd_2011/Maccum_2011).values.mean()*100:.2f}% "
+#     f"for 2011 PAIPR layers."
+# )
+
+# print(
+#     f"The mean bias between manually-traced and "
+#     f"PAIPR-derived accumulation for 2016 is "
+#     f"{res_2016.values.mean():.2f} mm/yr ("
+#     f"{res2016_perc.values.mean():.2f}% of mean accum) "
+#     f"with a RMSE of {res2016_perc.values.std():.2f}%."
+# )
+# print(
+#     f"The mean annual accumulation for 2016 results are "
+#     f"{Maccum_2016.values.mean():.0f} mm/yr for PAIPR " 
+#     f"and {man2016_accum.values.mean():.0f} mm/yr "
+#     f"for manual results."
+# )
+# print(
+#     f"The mean standard deviations of the annual "
+#     f"accumulation estimates are "
+#     f"{(man2016_std/man2016_accum).values.mean()*100:.2f}% " 
+#     f"for 2016 manual layers and "
+#     f"{(Mstd_2016/Maccum_2016).values.mean()*100:.2f}% "
+#     f"for 2016 PAIPR layers."
+# )
+
+# print(
+#     f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
+#     f"{man_res.values.mean():.1f} mm/yr ("
+#     f"{man_res_perc.values.mean():.2f}% of mean accum) "
+#     f"with a RMSE of {man_res_perc.values.std():.2f}%."
+# )
+# print(
+#     f"The mean annual accumulation for manual results are "
+#     f"{accum_man2011.values.mean():.0f} mm/yr for 2011 " 
+#     f"and {accum_man2016.values.mean():.0f} mm/yr for 2016"
+# )
+# print(
+#     f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
+
+# print(
+#     f"The mean bias in manually-derived annual accumulation 2016 vs 2011 flights is "
+#     f"{res_tmp.values.mean():.1f} mm/yr ("
+#     f"{res_perc_tmp.values.mean():.2f}% of mean accum) "
+#     f"with a RMSE of {res_perc_tmp.values.std():.2f}%."
+# )
+# print(
+#     f"The mean annual accumulation for manual results are "
+#     f"{accum_tmp2011.values.mean():.0f} mm/yr for 2011 " 
+#     f"and {accum_tmp2016.values.mean():.0f} mm/yr for 2016"
+# )
+# print(
+#     f"The mean standard deviations of the annual accumulation estimates are {(std_man2011/accum_man2011).values.mean()*100:.2f}% for 2011 and {(std_man2016/accum_man2016).values.mean()*100:.2f}% for 2016.")
 
 # %%
 
 def panels_121(
     datum_1, datum_2, 
-    xlabels=[
-        '2011 PAIPR (mm/yr)', '2011 manual (mm/yr)', 
-        '2011 PAIPR (mm/yr)', '2016 PAIPR (mm/yr)'], 
-    ylabels=[
-    '2016 PAIPR (mm/yr)', '2016 manual (mm/yr)', 
-    '2011 manual (mm/yr', '2016 manual (mm/yr)'],
-    kde_colors=['blue', 'red', 'purple', 'orange'], 
+    xlabels=None, ylabels=None,
+    # xlabels=[
+    #     '2011 PAIPR (mm/yr)', '2011 manual (mm/yr)', 
+    #     '2011 PAIPR (mm/yr)', '2016 PAIPR (mm/yr)'], 
+    # ylabels=[
+    # '2016 PAIPR (mm/yr)', '2016 manual (mm/yr)', 
+    # '2011 manual (mm/yr', '2016 manual (mm/yr)'],
+    TOP=False, BOTTOM=False,
+    kde_colors=['#d55e00', '#cc79a7', '#0072b2', '#009e73'], 
     kde_labels=[
         '2016-2011 PAIPR', '2016-2011 manual', 
         '2011 PAIPR-manual', '2016 PAIPR-manual'], 
-    plot_min=None, plot_max=None, size=600):
+    plot_min=None, plot_max=None, size=500):
     
     """A function to generate a Holoviews Layout consisting of 1:1 plots of the given datum, with a kernel density plot also showing the residuals between datum-1 and datum-2.
 
     Args:
         datum_1 (list of pandas.DataFrames): Data to be included on the x-axis of 1:1 plots.
         datum_2 (list of pandas.DataFrames): Data to be included on the y-axis of 1:1 plots.
-        xlabels (list, optional): List of strings to use as the x-labels for the 1:1 plots. Defaults to [ '2011 PAIPR (mm/yr)', '2011 manual (mm/yr)', '2011 PAIPR (mm/yr)', '2016 PAIPR (mm/yr)'].
-        ylabels (list, optional): List of strings to use as the y-labels for the 1:1 plots. Defaults to [ '2016 PAIPR (mm/yr)', '2016 manual (mm/yr)', '2011 manual (mm/yr', '2016 manual (mm/yr)'].
+        xlabels (list, optional): List of strings to use as the x-labels for the 1:1 plots. Defaults to None.
+        ylabels (list, optional): List of strings to use as the y-labels for the 1:1 plots. Defaults to None.
         kde_colors (list, optional): List of colors to use in kde plots. Defaults to ['blue', 'red', 'purple', 'orange'].
         kde_labels (list, optional): List of labels to use in kde plots. Defaults to [ '2016-2011 PAIPR', '2016-2011 manual', '2011 PAIPR-manual', '2016 PAIPR-manual'].
         size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 600.
@@ -1059,6 +1246,10 @@ def panels_121(
     # Preallocate subplot lists
     one2one_plts = []
     kde_plots = []
+    if xlabels is None:
+        xlabels = np.repeat(None, len(datum_1))
+    if ylabels is None:
+        ylabels = np.repeat(None, len(datum_1))
 
     # Iterate through different input data
     for i, data1 in enumerate(datum_1):
@@ -1091,16 +1282,29 @@ def panels_121(
         # Generate 1:1 scatter plot, gradated by year
         scatt_yr = hv.Points(
             data=long_df, kdims=['Accum_x', 'Accum_y'], 
-            vdims=['Year'])
+            vdims=['Year']).opts(
+                xlim=(plot_min, plot_max), 
+                ylim=(plot_min, plot_max), 
+                xlabel=xlabels[i], 
+                ylabel=ylabels[i], 
+                color='Year', cmap='Category20b', colorbar=False)
+        scatt_yr.opts(
+            labelled=[], show_grid=True, xaxis=None, yaxis=None)
+
+        # Special formatting given position of subplot in figure
+        if i==0:
+            scatt_yr.opts(yaxis='left')
+            # scatt_yr.opts(ylabel='Annual accum (mm/yr)')
+        if i==len(datum_1)-1:
+            scatt_yr.opts(colorbar=True)
+        if TOP:
+            scatt_yr.opts(xaxis='top')
+        if BOTTOM:
+            scatt_yr.opts(xaxis='bottom')
 
         # Combine 1:1 line and scatter plot and add to plot list
-        one2one_plt = one2one_line * scatt_yr.opts(
-            xlim=(plot_min, plot_max), 
-            ylim=(plot_min, plot_max), 
-            xlabel=xlabels[i], 
-            ylabel=ylabels[i], 
-            color='Year', cmap='plasma', colorbar=True, 
-            width=size, height=size, fontscale=1.5)
+        one2one_plt = (one2one_line * scatt_yr).opts(
+            width=size, height=size, fontscale=2)
         one2one_plts.append(one2one_plt)
 
         # Generate kde for residuals of given estimates and 
@@ -1117,8 +1321,16 @@ def panels_121(
     fig_kde = (
         kde_plots[0] * kde_plots[1] 
         * kde_plots[2] * kde_plots[3]).opts(
-            xlabel='Accum residual (% of mean accum)', 
-            width=size, height=size)
+            xaxis=None, yaxis='right', 
+            width=size, height=size, 
+            show_grid=True, fontscale=2)
+    
+    # Specific formatting based on subplot position
+    if TOP:
+        fig_kde = fig_kde.opts(xaxis='top', xlabel='% Bias')
+    if BOTTOM:
+        fig_kde = fig_kde.opts(xaxis='bottom', xlabel='% Bias')
+
 
     # Generate final panel Layout with 1:1 and kde plots
     fig_layout = hv.Layout(
@@ -1135,21 +1347,22 @@ figs_supp2 = []
 
 # Add full dataset Layout to Layout list
 figs_supp2.append(
-        panels_121(
+    panels_121(
         datum_1=[
             accum_2011, accum_man2011, 
             Maccum_2011, Maccum_2016], 
         datum_2=[
             accum_2016, accum_man2016, 
             man2011_accum, man2016_accum], 
-            plot_min=100, plot_max=800))
+        plot_min=80, plot_max=820, 
+        TOP=True))
 
 # Get list of unique sites in data
 site_list = np.unique(gdf_PAIPR['Site']).tolist()
 site_list.remove("Null")
 
 # Iterate through sites
-for site in site_list:
+for i, site in enumerate(site_list):
 
     # Get indices of current site in the given datasets
     PAIPR_idx = np.flatnonzero(gdf_PAIPR['Site']==site)
@@ -1171,28 +1384,20 @@ for site in site_list:
 
     # Generate panel figures for current site and add 
     # to figure list
-    figs_supp2.append(panels_121(
-        datum_1=data1, datum_2=data2, 
-        plot_min=100, plot_max=800))
+    if i==(len(site_list)-1):
+        figs_supp2.append(panels_121(
+            datum_1=data1, datum_2=data2, 
+            plot_min=80, plot_max=820, BOTTOM=True))
+    else:
+        figs_supp2.append(panels_121(
+            datum_1=data1, datum_2=data2, 
+            plot_min=80, plot_max=820))
 
 # Combine individual site panels to final Supplementary figure
 fig_supp2 = hv.Layout(
     figs_supp2[0] + figs_supp2[1] + figs_supp2[2] 
     + figs_supp2[3] + figs_supp2[4] + figs_supp2[5]
     + figs_supp2[6]).cols(5)
-
-# %%
-
-# res_grid_plt = (
-#     plt_manPTS.opts(color='black')*
-#     plt_res.opts(size=5)
-#     * plt_labels.opts(
-#         text_color='black', text_font_size='22pt')).opts(
-#             fontscale=1.75)
-
-# results_plt = hv.Layout(
-#     paipr_1to1_plt+PM_1to1_plt+man_1to1_plt+res_grid_plt).cols(2)
-# results_plt
 
 # %%
 
@@ -1209,8 +1414,29 @@ tsfig_2016.savefig(
     fname=ROOT_DIR.joinpath(
         'docs/Figures/oib-repeat/tsfig_2016.svg'))
 
-kde_fig.savefig(
-    fname='docs/Figures/oib-repeat/kde_fig.svg')
+kde_fig.savefig(fname=ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/kde_fig.svg'))
+
+# %%
+
+# fig_list = [col1, col2, col3, col4]
+# ts_fig = plt.figure()
+# # ts_fig = plt.subplots(
+# #     ncols=len(fig_list), nrows=len(chunk_centers))
+
+# for i, fig in enumerate(fig_list):
+#     axes = fig.axes
+#     for j, ax in enumerate(axes):
+
+#         ax.remove()
+
+#         ax.figure=ts_fig
+#         ts_fig.axes.append(ax)
+#         ts_fig.add_axes(ax)
+
+#         dummy = ts_fig.add_subplot(j+1,i+1,1)
+#         ax.set_position(dummy.get_position())
+#         dummy.remove()
 
 # %%
 
@@ -1239,23 +1465,35 @@ kde_fig.savefig(
 
 # %%
 
-from bokeh.io import export_svgs
+# from bokeh.io import export_svgs
 
-def export_svg(obj, filename):
-    plot_state = hv.renderer('bokeh').get_plot(obj).state
-    plot_state.output_backend = 'svg'
-    export_svgs(plot_state, filename=filename)
+# def export_svg(obj, filename):
+#     plot_state = hv.renderer('bokeh').get_plot(obj).state
+#     plot_state.output_backend = 'svg'
+#     export_svgs(plot_state, filename=filename)
 
-# p = hv.render(data_map, backend='matplotlib')
-
+# print('svg plotting')
 # export_svg(data_map, ROOT_DIR.joinpath(
 #     'docs/Figures/oib-repeat/data_map.svg'))
+# print('done with first plot')
+# export_svg(fig_supp2, ROOT_DIR.joinpath(
+#     'docs/Figures/oib-repeat/one2one_plts.svg'))
+# print('done with second plot')
 
 hv.save(data_map, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/data_map.png'))
-# hv.save(results_plt, ROOT_DIR.joinpath(
-#     'docs/Figures/oib-repeat/results.png'))
+hv.save(res_map, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/res_map.png'))
 hv.save(fig_supp2, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/one2one_plts.png'))
+
+
+
+
+# ts_panel = pn.Row(
+#     tsfig_PAIPR, tsfig_manual, tsfig_2011, tsfig_2016,
+#     background='white')
+# ts_panel.save(ROOT_DIR.joinpath(
+#     'docs/Figures/oib-repeat/ts_ALL.png'))
 
 # %%
