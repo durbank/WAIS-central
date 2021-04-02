@@ -274,8 +274,8 @@ Ant_bnds = gv.Shape.from_shapefile(
     shp, crs=ANT_proj).opts(
         projection=ANT_proj, color='silver')
 
-# Add plot to workspace
-(Ant_bnds * radar_bnds).opts(
+# Create inset map
+inset_map = (Ant_bnds * radar_bnds).opts(
     width=700, height=700, bgcolor='lightsteelblue')
 
 # %%
@@ -385,36 +385,37 @@ core_t_plt = gv.Points(
         colorbar=True, size='size', line_color='black', 
         marker='triangle', tools=['hover'])
 
-
 sig_pltALL = (
     insig_plt*sig_plt*insig_core_plt
     *sig_core_plt.redim.range(trend=(t_min,t_max))
-)
+    )
 
-(
-    (elev_plt.opts(cmap='dimgray')
+# %% Final formatting for above plots
+
+trend_plt = (
+    elev_plt.opts(cmap='dimgray', colorbar=False)
         # * cont_plt.opts(cmap='dimgray')
-        * t_plt*core_t_plt.redim.range(trend=(-15,15))
-    ).opts(
-        width=700, height=700, 
-        xlim=gdf_bounds['x_range'], 
-        ylim=gdf_bounds['y_range']) 
-    + (elev_plt.opts(cmap='dimgray') * tERR_plt).opts(
+    * t_plt
+    * core_t_plt.redim.range(trend=(-15,15))).opts(
         width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range'])
-    + (elev_plt.opts(cmap='dimgray') * sig_pltALL).opts(
+
+trend_sig_plt = (
+    elev_plt.opts(cmap='dimgray', colorbar=False) 
+    * sig_pltALL).opts(
         width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range'])
-)
-#     + (elev_plt.opts(cmap='dimgray') 
-#         * count_plt.redim.range(trace_count=(0,30))).opts(
-#             width=600, height=400)
-# )
 
+tMOE_plt = (
+    elev_plt.opts(cmap='dimgray', colorbar=False) 
+    * tERR_plt).opts(
+        width=700, height=700, 
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
 
-
+# trend_plt + tMOE_plt + trend_sig_plt
 
 # %% Trends with all cores (not all cover full time period)
 
@@ -433,7 +434,7 @@ rLOC_plt = gv.Polygons(
         projection=ANT_proj, line_color=None, 
         color='black')
 
-coreALL_plt = gv.Points(
+coreTMP_plt = gv.Points(
     data=gdf_long, 
     vdims=['Name', 'trend', 't_lb', 't_ub', 'size'], 
     crs=ANT_proj).opts(
@@ -443,13 +444,14 @@ coreALL_plt = gv.Points(
         line_color='black', 
         marker='triangle', tools=['hover'])
 
-(
-    coreALL_plt*Ant_bnds*rLOC_plt*coreALL_plt.opts(
-        bgcolor='lightsteelblue').redim.range(trend=(-15,15))
-).opts(
-    xlim=core_bounds['x_range'], 
-    ylim=core_bounds['y_range'], 
-    width=700, height=700)
+coreALL_plt = (
+    coreTMP_plt*Ant_bnds*rLOC_plt
+    * coreTMP_plt.opts(
+        bgcolor='lightsteelblue').redim.range(
+            trend=(-15,15))).opts(
+        xlim=core_bounds['x_range'], 
+        ylim=core_bounds['y_range'], 
+        width=700, height=700)
 
 # %% Limit time series to those within the bounds
 
@@ -492,30 +494,35 @@ duration_plt = gv.Polygons(
         cmap='magma', colorbar=True, 
         line_color=None, tools=['hover'])
 
-(
-    (elev_plt.opts(cmap='dimgray')
+# %% Final formating of above plots
+
+AllAccum_plt = (
+    elev_plt.opts(cmap='dimgray', colorbar=False)
     * (aALL_plt*accum_core_plt).redim.range(
         accum=(ac_min,ac_max))
     ).opts(
         width=700, height=700,  
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range'])
-    + (elev_plt.opts(cmap='dimgray')*duration_plt).opts(
+
+ALLduration_plt = (
+    elev_plt.opts(cmap='dimgray', colorbar=False)
+    * duration_plt).opts(
         width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range'])
-)
 
 # %% 1979-2010 accum plot
 
-(
+
+accum1979_plt = (
     elev_plt.opts(cmap='dimgray', colorbar=False)
     * (accum_plt*accum_core_plt).redim.range(
         accum=(250,500))
-).opts(
-    width=700, height=700, 
-    xlim=gdf_bounds['x_range'], 
-    ylim=gdf_bounds['y_range'])
+    ).opts(
+        width=700, height=700, 
+        xlim=gdf_bounds['x_range'], 
+        ylim=gdf_bounds['y_range'])
 
 # %%
 
@@ -530,23 +537,23 @@ print(f"Mean bias between 1979-2010 mean accum and mean accum for full available
 print(f"RMSE between 1979-2010 mean accum and mean for full duration is {rmse_accum:.2f} mm/yr ({100*rmse_accum/gdf_grid['accum'].mean():.2f}%)")
 
 res_gdf = gpd.GeoDataFrame(
-    data=100*res_accum/gdf_grid.accum, 
+    data={'res_accum':100*res_accum/gdf_grid.accum}, 
     geometry=ALL_subset.geometry, 
     crs=ALL_subset.crs)
 
-res_plt = gv.Polygons(
-    data=res_gdf, vdims=['accum'], 
+res_tmp = gv.Polygons(
+    data=res_gdf, vdims=['res_accum'], 
     crs=ANT_proj).opts(
-        projection=ANT_proj, color='accum', 
+        projection=ANT_proj, color='res_accum', 
         cmap='PRGn', colorbar=True, symmetric=True,
         line_color=None, tools=['hover'])
 
-res_min = np.quantile(res_gdf.accum, 0.01)
-res_max = np.quantile(res_gdf.accum, 0.99)
+res_min = np.quantile(res_gdf.res_accum, 0.01)
+res_max = np.quantile(res_gdf.res_accum, 0.99)
 
-(
+res_plt = (
     elev_plt.opts(cmap='dimgray', colorbar=False)
-    * res_plt.redim.range(accum=(res_min,res_max))
+    * res_tmp.redim.range(res_accum=(res_min,res_max))
     ).opts(
         width=700, height=700,  
         xlim=gdf_bounds['x_range'], 
@@ -568,7 +575,7 @@ core_plt = gv.Points(
         tools=['hover'])
 
 # Add to workspace
-(
+data_map = (
     elev_plt.opts(cmap='dimgray', colorbar=True) 
     * radar_plt * core_plt
     ).opts(
@@ -707,14 +714,24 @@ ERR_BIG_plt = gv.Polygons(
     line_color=None, cmap='plasma', colorbar=True, 
     tools=['hover'])
 
-(
-    (tBIG_plt*sig_plt*radar_plt).opts(
-        width=700, height=700, 
-        bgcolor='silver').redim.range(
+
+
+trendBig_plt = (
+    # elev_plt.opts(cmap='dimgray', colorbar=False)*
+    tBIG_plt*sig_plt*radar_plt).opts(
+        width=700, height=700
+        , bgcolor='silver'
+        ).redim.range(
         trend=(tr_min,tr_max))
-    + (ERR_BIG_plt.redim.range(MoE=(ERR_min,ERR_max))
-        * radar_plt).opts(width=700, height=700, bgcolor='silver')
-)
+
+moeBig_plt = (
+    # elev_plt.opts(cmap='dimgray', colorbar=False)*
+    ERR_BIG_plt.redim.range(MoE=(ERR_min,ERR_max))
+    * radar_plt).opts(width=700, height=700
+    , bgcolor='silver'
+    )
+
+# trendBig_plt + moeBig_plt
 
 # %% Time series correlations to create clustered groups
 
@@ -835,8 +852,8 @@ G_cmap = {
     'A':'#66C2A5', 'B':'#FC8D62', 
     'C':'#8DA0CB', 'D':'#E78AC3'}
 
-
-fig = plt.figure(figsize=(13, 10))
+plt.rcParams.update({'font.size': 18})
+BigTS_fig = plt.figure(figsize=(13, 10))
 outer = gridspec.GridSpec(
     2, 2, wspace=0.4, hspace=0.3)
 
@@ -864,8 +881,8 @@ for i, group in enumerate(
     inner = gridspec.GridSpecFromSubplotSpec(
         2, 1,subplot_spec=outer[i], 
         wspace=0.2, hspace=0.25)
-    ax1 = plt.Subplot(fig, inner[0])
-    ax2 = plt.Subplot(fig, inner[1])
+    ax1 = plt.Subplot(BigTS_fig, inner[0])
+    ax2 = plt.Subplot(BigTS_fig, inner[1])
     ax1.set_title(
         'Grid Group '+alpha_dict[i]+' time series')
 
@@ -890,8 +907,8 @@ for i, group in enumerate(
         accum_BIG.index[-1]])
     ax2.set_ylabel('# traces')
 
-    fig.add_subplot(ax1)
-    fig.add_subplot(ax2)
+    BigTS_fig.add_subplot(ax1)
+    BigTS_fig.add_subplot(ax2)
 
     if core_count.sum():
         ax3=ax2.twinx()
@@ -899,9 +916,9 @@ for i, group in enumerate(
             ax=ax3, color='grey', linewidth=2, 
             linestyle='--')
         ax3.set_ylabel('# Cores')
-        fig.add_subplot(ax3)
+        BigTS_fig.add_subplot(ax3)
 
-fig.show()
+# BigTS_fig.show()
 # fig.savefig('Figuresbig-ts.pdf', bbox_inches='tight')
 # %%
 
@@ -947,7 +964,7 @@ radar_plt = gv.Polygons(
         line_color=None, color='black')
 
 # Core data plot
-core_plt = gv.Points(
+coreBig_plt = gv.Points(
     gdf_cores, crs=ANT_proj, 
     vdims=['Name', 'size']).opts(
         projection=ANT_proj, color='blue', 
@@ -955,11 +972,67 @@ core_plt = gv.Points(
         size='size', tools=['hover'])
 
 # Add plot to workspace
-(
+group_map = (
     group_plt * grid_plt * radar_plt 
-    * grp_labs * core_plt).opts(
+    * grp_labs * coreBig_plt).opts(
         width=700, height=700, 
         xlim=bounds['x_range'], 
         ylim=bounds['y_range'], bgcolor='silver')
 
 # %%
+
+elev_plt = elev_plt.opts(colorbar=True)
+data_map = data_map.opts(fontscale=2)
+data_panel = (inset_map + data_map)
+
+
+hv.save(inset_map, ROOT_DIR.joinpath(
+    'docs/Figures/inset.png'))
+hv.save(data_map, ROOT_DIR.joinpath(
+    'docs/Figures/data_map.png'))
+
+# %%
+
+elev_plt = elev_plt.opts(colorbar=False)
+
+accum_panel = hv.Layout(
+    AllAccum_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + ALLduration_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + accum1979_plt.opts(
+        width=1000, height=1000, fontscale=2)
+    + res_plt.opts(
+        width=1000, height=1000, fontscale=2)).cols(2)
+
+trend_panel = hv.Layout(
+    trend_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + tMOE_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + trend_sig_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + coreALL_plt.opts(
+        height=1000, width=1000, fontscale=2)).cols(
+    2).redim.range(trend=(-15,15))
+
+BIG_panel = hv.Layout(
+    trendBig_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + moeBig_plt.opts(
+        height=1000, width=1000, fontscale=2)
+    + group_map.opts(
+        height=1000, width=1000, fontscale=2)).cols(2)
+
+
+hv.save(accum_panel, ROOT_DIR.joinpath(
+    'docs/Figures/accum_panel.png'))
+hv.save(trend_panel, ROOT_DIR.joinpath(
+    'docs/Figures/trend_panel.png'))
+hv.save(BIG_panel, ROOT_DIR.joinpath(
+    'docs/Figures/BIG_panel.png'))
+
+# %%
+
+BigTS_fig.savefig(fname=ROOT_DIR.joinpath(
+    'docs/Figures/BigTS_fig.svg'))
