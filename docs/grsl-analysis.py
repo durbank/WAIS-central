@@ -18,6 +18,7 @@ hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
 import panel as pn
 import seaborn as sns
+import xarray as xr
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -135,7 +136,6 @@ chunk_centers = gpd.GeoDataFrame({
 
 #%% Data location map
 
-
 plt_accum2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
@@ -162,7 +162,7 @@ plt_loc2016 = gv.Points(
 plt_locCOMB = gv.Points(
     gdf_PAIPR, crs=ANT_proj, 
     vdims=['accum_2011','accum_2016']).opts(
-        projection=ANT_proj, color='mistyrose', 
+        projection=ANT_proj, color='white', 
         size=10, bgcolor='silver', tools=['hover'], 
         width=700, height=700)
 
@@ -186,6 +186,31 @@ plt_labels = hv.Labels(
 #     plt_locCOMB * plt_manPTS 
 #     * (plt_accum2011 * plt_accum2016) * plt_labels
 # )
+
+# %%
+
+# Define Antarctic DEM file
+xr_DEM = xr.open_rasterio(
+    ROOT_DIR.joinpath(
+        'data/Antarctica_Cryosat2_1km_DEMv1.0.tif')).squeeze()
+
+# Get bounds (with buffer) of data radar set
+gdf_bounds = {
+    'x_range': tuple(np.round(
+        gdf_2016.total_bounds[0::2]+[-25000,25000])), 
+    'y_range': tuple(np.round(
+        gdf_2016.total_bounds[1::2]+[-25000,25000]))}
+
+# Clip elevation data to radar bounds
+xr_DEM = xr_DEM.sel(
+    x=slice(gdf_bounds['x_range'][0], gdf_bounds['x_range'][1]), 
+    y=slice(gdf_bounds['y_range'][1], gdf_bounds['y_range'][0]))
+
+tpl_bnds = (
+    gdf_bounds['x_range'][0], gdf_bounds['y_range'][0], 
+    gdf_bounds['x_range'][1], gdf_bounds['y_range'][1])
+elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
+    cmap='dimgray', colorbar=False, width=700, height=700)
 
 # %% PAIPR residuals
 
@@ -267,7 +292,7 @@ PAIPR_df = pd.DataFrame(
 PAIPR_df['res_accum'] = PAIPR_df['accum_2016']-PAIPR_df['accum_2011']
 PAIPR_df['res_perc'] = (
     100*(PAIPR_df['res_accum'])
-    /(PAIPR_df['accum_2016']+PAIPR_df['accum_2011']).mean())
+    /(PAIPR_df[['accum_2016','accum_2011']]).mean(axis=1))
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -667,7 +692,7 @@ PAP_man_df = pd.concat([tmp_df1, tmp_df2], axis=0)
 PAP_man_df['res_accum'] = PAP_man_df['accum_paipr']-PAP_man_df['accum_man']
 PAP_man_df['res_perc'] = (
     100*(PAP_man_df['res_accum'])
-    /(PAP_man_df['accum_paipr']+PAP_man_df['accum_man']).mean())
+    /(PAP_man_df[['accum_paipr','accum_man']]).mean(axis=1))
 
 # %%
 
@@ -843,7 +868,7 @@ man_df = pd.DataFrame(
 man_df['res_accum'] = man_df['accum_2016']-man_df['accum_2011']
 man_df['res_perc'] = (
     100*(man_df['res_accum'])
-    /(man_df['accum_2016']+man_df['accum_2011']).mean())
+    /(man_df[['accum_2016','accum_2011']]).mean(axis=1))
 
 one_to_one = hv.Curve(
     data=pd.DataFrame(
@@ -891,23 +916,31 @@ tsfig_PAIPR = plot_TScomp(
 # %% Data location map
 
 data_map = (
-    plt_locCOMB * plt_manPTS 
+    elev_plt.opts(colorbar=False)
+    * plt_locCOMB * plt_manPTS 
     * (plt_accum2011 * plt_accum2016) 
     * plt_labels.opts(text_font_size='32pt')
 )
 
 data_map = data_map.opts(fontscale=2.5, width=1200, height=1200)
 
-
-res_map = plt_manPTS* plt_res * plt_labels.opts(
-    text_font_size='32pt')
+res_map = (
+    elev_plt.opts(colorbar=False) * plt_manPTS* plt_res 
+    * plt_labels.opts(text_font_size='32pt'))
 res_map = res_map.opts(fontscale=2.5, width=1200, height=1200)
+
+elev_bar = elev_plt.opts(
+    colorbar=True, fontscale=2.5, width=1200, height=1200)
 
 # %%
 
-PAIPR_df = PAIPR_df.query("Site != 'Null'")
+# PAIPR_df = PAIPR_df.query("Site != 'Null'")
+
+
 PAP_man_df = PAP_man_df.query("Site != 'Null'")
 man_df = man_df.query("Site != 'Null'")
+# PAP_man_df = PAP_man_df.query("Site != 'B'")
+# man_df = man_df.query("Site != 'B'")
 
 df_2011 = PAP_man_df.query('flight==2011')
 df_2016 = PAP_man_df.query('flight==2016')
@@ -917,8 +950,9 @@ df_2016 = PAP_man_df.query('flight==2016')
 plt.rcParams.update({'font.size': 22})
 kde_fig = plt.figure(figsize=(12,8))
 
+ax0 = kde_fig.add_subplot()
+ax0.axvline(color='black', linestyle='--')
 ax1 = kde_fig.add_subplot()
-ax1.axvline(color='black', linestyle='--')
 sns.kdeplot(
     ax=ax1, 
     data=PAIPR_df['res_perc'], 
@@ -950,19 +984,40 @@ print(
     f"{PAIPR_df['res_perc'].mean():.2f}% of mean accum) "
     f"with a RMSE of {PAIPR_df['res_perc'].std():.2f}%."
 )
+# print(
+#     f"The mean annual accumulation for PAIPR results are "
+#     f"{PAIPR_df['accum_2011'].mean():.0f} mm/yr for 2011 " 
+#     f"and {PAIPR_df['accum_2016'].mean():.0f} mm/yr for 2016"
+# )
+# print(
+#     f"The mean standard deviations of the annual "
+#     f"accumulation estimates are "
+#     f"{(100*PAIPR_df['std_2011']/PAIPR_df['accum_2011']).mean():.2f}% " 
+#     f"for the 2011 flight and "
+#     f"{(100*PAIPR_df['std_2016']/PAIPR_df['accum_2016']).mean():.2f}% "
+#     f"for the 2016 flight."
+# )
+
 print(
-    f"The mean annual accumulation for PAIPR results are "
-    f"{PAIPR_df['accum_2011'].mean():.0f} mm/yr for 2011 " 
-    f"and {PAIPR_df['accum_2016'].mean():.0f} mm/yr for 2016"
+    f"The mean bias between manually-derived results "
+    f"between 2016 and 2011 flights is "
+    f"{man_df['res_accum'].mean():.1f} mm/yr ("
+    f"{man_df['res_perc'].mean():.2f}% of mean accum) "
+    f"with a RMSE of {man_df['res_perc'].std():.2f}%."
 )
-print(
-    f"The mean standard deviations of the annual "
-    f"accumulation estimates are "
-    f"{(100*PAIPR_df['std_2011']/PAIPR_df['accum_2011']).mean():.2f}% " 
-    f"for the 2011 flight and "
-    f"{(100*PAIPR_df['std_2016']/PAIPR_df['accum_2016']).mean():.2f}% "
-    f"for the 2016 flight."
-)
+# print(
+#     f"The mean annual accumulation for manual results are "
+#     f"{man_df['accum_2011'].mean():.0f} mm/yr for 2011 " 
+#     f"and {man_df['accum_2016'].mean():.0f} mm/yr for 2016"
+# )
+# print(
+#     f"The mean standard deviations of the manual annual "
+#     f"accumulation estimates are "
+#     f"{(100*man_df['std_2011']/man_df['accum_2011']).mean():.2f}% " 
+#     f"for the 2011 flight and "
+#     f"{(100*man_df['std_2016']/man_df['accum_2016']).mean():.2f}% "
+#     f"for the 2016 flight."
+# )
 
 print(
     f"The mean bias between manually-traced and "
@@ -1004,27 +1059,6 @@ print(
     f"for 2016 manual layers and "
     f"{(df_2016['std_paipr']/df_2016['accum_paipr']).mean()*100:.2f}% "
     f"for 2016 PAIPR layers."
-)
-
-print(
-    f"The mean bias between manually-derived results "
-    f"between 2016 and 2011 flights is "
-    f"{man_df['res_accum'].mean():.1f} mm/yr ("
-    f"{man_df['res_perc'].mean():.2f}% of mean accum) "
-    f"with a RMSE of {man_df['res_perc'].std():.2f}%."
-)
-print(
-    f"The mean annual accumulation for manual results are "
-    f"{man_df['accum_2011'].mean():.0f} mm/yr for 2011 " 
-    f"and {man_df['accum_2016'].mean():.0f} mm/yr for 2016"
-)
-print(
-    f"The mean standard deviations of the manual annual "
-    f"accumulation estimates are "
-    f"{(100*man_df['std_2011']/man_df['accum_2011']).mean():.2f}% " 
-    f"for the 2011 flight and "
-    f"{(100*man_df['std_2016']/man_df['accum_2016']).mean():.2f}% "
-    f"for the 2016 flight."
 )
 
 # %%
@@ -1365,6 +1399,8 @@ kde_fig.savefig(fname=ROOT_DIR.joinpath(
 
 hv.save(data_map, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/data_map.png'))
+hv.save(elev_bar, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/elev_bar.png'))
 hv.save(res_map, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/res_map.png'))
 hv.save(fig_supp2, ROOT_DIR.joinpath(
