@@ -1,3 +1,11 @@
 {
-    "python.pythonPath": "/home/durbank/miniconda3/envs/wais-central/bin/python"
+    "python.pythonPath": "/home/durbank/miniconda3/envs/wais-central/bin/python",
+    "spellright.language": [
+        "en_US"
+    ],
+    "spellright.documentTypes": [
+        "markdown",
+        "latex",
+        "plaintext"
+    ]
 }
