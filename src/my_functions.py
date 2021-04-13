@@ -489,10 +489,10 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
 
     trend_mu = np.nanmean(trends_bs, axis=0)
     intercept_mu = np.nanmean(intercepts, axis=0)
-    trend_05 = np.nanpercentile(trends_bs, 2.5, axis=0)
-    trend_95 = np.nanpercentile(trends_bs, 97.5, axis=0)
+    trendCI_lb = np.nanpercentile(trends_bs, 2.5, axis=0)
+    trendCI_ub = np.nanpercentile(trends_bs, 97.5, axis=0)
 
-    return trend_mu, intercept_mu, trend_05, trend_95
+    return trend_mu, intercept_mu, trendCI_lb, trendCI_ub
 
 # Function to perform autocorrelation
 def acf(df):
