@@ -51,9 +51,6 @@ xr_DEM = xr.open_rasterio(
 
 # Import raw data
 data_list = [folder for folder in DATA_DIR.glob('*')]
-# data_list = [
-#     path for path in data_list 
-#     if "20141103" not in str(path)] #Removes 2014 results, as there are too few and are suspect
 data_raw = pd.DataFrame()
 for folder in data_list:
     data = import_PAIPR(folder)
@@ -66,8 +63,6 @@ data_0 = data_raw.query(
     ['collect_time', 'Year']).reset_index(drop=True)
 
 # Format and sort results for further processing
-# data_form = format_PAIPR(data_0).drop(
-#     'elev', axis=1)
 data_form = format_PAIPR(data_0)
 
 # Create time series arrays for annual accumulation 
@@ -101,7 +96,6 @@ new_row.name = 'Duration'
 core_meta = core_meta.append(new_row)
 
 # Flip to get results in tidy-compliant form
-# core_ALL = core_ALL.transpose()
 core_meta = core_meta.transpose()
 core_meta.index.name = 'Name'
 
@@ -120,7 +114,6 @@ bbox = Polygon(
 
 # Subset core results to region of interest
 keep_idx = core_locs.within(bbox)
-# gdf_cores = core_locs[keep_idx]
 gdf_cores = core_locs.loc[keep_idx,:]
 core_ACCUM = core_ALL.loc[:,keep_idx].sort_index()
 
@@ -181,10 +174,6 @@ gdf_grid['trend'] = trends
 gdf_grid['t_lb'] = lb
 gdf_grid['t_ub'] = ub
 gdf_grid['t_perc'] = 100 * trends / gdf_grid['accum']
-# gdf_grid['trend'] = trends / gdf_grid['accum']
-# gdf_grid['t_lb'] = lb / gdf_grid['accum']
-# gdf_grid['t_ub'] = ub / gdf_grid['accum']
-# gdf_grid['t_abs'] = trends
 
 # Add factor for trend signficance
 insig_idx = gdf_grid.query(
@@ -222,7 +211,6 @@ for name, series in accum_grid.items():
 gdf_grid['rlm_T'] = rlm_param
 gdf_grid['rlm_lb'] = rlm_Tlb
 gdf_grid['rlm_ub'] = rlm_Tub
-
 
 # %% Calculate trends for partial-coverage cores
 
@@ -264,8 +252,6 @@ gdf_bounds = {
     'x_range': (-1.5E6-25E3, -9.9E5+25E3),
     'y_range': (-4.8E5-25E3, -5E4+25E3)}
 
-
-
 # Bounds of radar data
 poly_bnds = Polygon([
     [gdf_bounds['x_range'][0], gdf_bounds['y_range'][0]], 
@@ -303,10 +289,6 @@ cont_plt = hv.operation.contours(elev_plt, levels=15)
 
 ac_max = gdf_grid.accum.max()
 ac_min = gdf_grid.accum.min()
-# ac_max = np.max(
-#     [gdf_core.accum.max(), gdf_grid.accum.max()])
-# ac_min = np.min(
-#     [gdf_core.accum.min(), gdf_grid.accum.min()])
 
 accum_plt = gv.Polygons(
     gdf_grid, 
@@ -459,12 +441,6 @@ trendPERC_plt = (
 
 # %% Trends with all cores (not all cover full time period)
 
-# Plot trends since 1979 (all)
-# t_max = np.max(
-#     [gdf_grid.trend.max(), gdf_long.trend.max()])
-# t_min = np.min(
-#     [gdf_grid.trend.min(), gdf_long.trend.min()])
-
 core_bounds = {
     'x_range': bbox.bounds[0::2], 
     'y_range': bbox.bounds[1::2]}
@@ -496,20 +472,8 @@ coreALL_plt = (
     xlim=core_bounds['x_range'], 
     ylim=core_bounds['y_range'], 
     width=700, height=700)
-# coreALL_plt = (
-#     coreTMP_plt*Ant_bnds*rLOC_plt
-#     * coreTMP_plt.opts(
-#         bgcolor='lightsteelblue').redim.range(
-#             trend=(-15,15))).opts(
-#         xlim=core_bounds['x_range'], 
-#         ylim=core_bounds['y_range'], 
-#         width=700, height=700)
 
 # %% Limit time series to those within the bounds
-
-# trace_idx = gdf_traces.within(poly_bnds)
-# gdf_traces = gdf_traces[trace_idx]
-# accum_ALL = 
 
 poly_idx = gdf_grid_ALL.within(poly_bnds)
 gdf_grid_ALL = gdf_grid_ALL[poly_idx]
@@ -565,7 +529,6 @@ ALLduration_plt = (
         ylim=gdf_bounds['y_range'])
 
 # %% 1979-2010 accum plot
-
 
 accum1979_plt = (
     elev_plt.opts(cmap='dimgray', colorbar=False)
@@ -643,52 +606,11 @@ data_map = (
 # gdf_grid_ALL['t_ub'] = ub
 # gdf_grid_ALL['t_perc'] = 100*trends / gdf_grid_ALL['accum']
 
-# %%
-
-# tr_max = np.quantile(gdf_grid_ALL.trend, 0.99)
-# tr_min = np.quantile(gdf_grid_ALL.trend, 0.01)
-# tALL_plt = gv.Polygons(
-#     data=gdf_grid_ALL, 
-#     vdims=['trend', 't_lb', 't_ub'], 
-#     crs=ANT_proj).opts(
-#         projection=ANT_proj, line_color=None, 
-#         cmap='coolwarm_r', symmetric=True, 
-#         colorbar=True, tools=['hover'])
-
-
-# gdf_ERR_ALL = gdf_grid_ALL.copy().drop(
-#     ['accum', 'std', 't_lb', 
-#     't_ub', 't_perc'], axis=1)
-# gdf_ERR_ALL['MoE'] = (
-#     gdf_grid_ALL['t_ub'] 
-#     - gdf_grid_ALL['t_lb']) / 2
-# ERR_max = np.quantile(gdf_ERR_ALL.MoE, 0.99)
-# ERR_min = np.quantile(gdf_ERR_ALL.MoE, 0.01)
-
-# ERR_all_plt = gv.Polygons(
-#     gdf_ERR_ALL, vdims=['MoE', 'trend'], 
-#     crs=ANT_proj).opts(projection=ANT_proj, 
-#     line_color=None, cmap='plasma', colorbar=True, 
-#     tools=['hover'])
-
-# (
-#     tALL_plt.opts(
-#         width=600, height=400, 
-#         bgcolor='silver').redim.range(
-#         trend=(tr_min,tr_max))
-#     + ERR_all_plt.opts(
-#         width=600, height=400, 
-#         bgcolor='silver').redim.range(
-#             MoE=(ERR_min,ERR_max))
-# )
-
-
 # %% Larger grid cells and composite time series
 
 cores_accum1960 = core_ACCUM.loc[1960::]
 gdf_cores['accum'] = core_ACCUM.loc[
     1960::,gdf_cores.index].mean()
-
 
 # Combine trace time series based on grid cells
 tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
@@ -781,7 +703,6 @@ ERR_BIG_plt = gv.Polygons(
     tools=['hover'])
 
 
-
 trendBig_plt = (
     # elev_plt.opts(cmap='dimgray', colorbar=False)*
     tBIG_plt*sig_plt*radar_plt).opts(
@@ -803,21 +724,6 @@ BigCount_plt = (
     width=700, height=700, bgcolor='silver')
 
 # trendBig_plt + moeBig_plt
-
-# %% Time series correlations to create clustered groups
-
-# gdf_tmp = gdf_BIG.copy()
-# corr_tmp = accum_BIG.copy()
-# groups = []
-
-# while gdf_tmp.shape[0] > 1:
-#     corr_BIG = corr_tmp.diff().corr()
-#     col_idx = corr_BIG[corr_BIG > 0].sum().idxmax()
-#     group_idx = corr_BIG[corr_BIG[col_idx] >= 0.50].index
-#     groups.append(group_idx.values)
-
-#     gdf_tmp.drop(group_idx, inplace=True)
-#     corr_tmp.drop(group_idx, axis=1, inplace=True)
 
 # %% K-means clustering to create groups
 
@@ -862,59 +768,6 @@ for i, group in enumerate(
 
 alpha_dict = {0: 'A', 1: 'B', 2: 'C', 3: 'D'}
 gdf_BIG.replace({'Group': alpha_dict}, inplace=True)
-
-# %%
-
-# poly_groups = []
-# G_cmap = {'A':'#66C2A5', 'B':'#FC8D62', 'C':'#8DA0CB', 'D':'#E78AC3'}
-
-# for i, group in enumerate(
-#     gdf_BIG.groupby('Group').groups):
-
-#     # Subset data based on group identity
-#     gdf_group = gdf_BIG[gdf_BIG['Group'] == group]
-#     accum_group = accum_BIG[gdf_group.index]
-#     count_group = yr_count_BIG[gdf_group.index]
-    
-#     # Merge group into single polygon
-#     poly = gdf_group.geometry.unary_union
-#     poly_groups.append(poly)
-
-#     # Build composite core from all cores withing poly
-#     cores_group = gdf_cores[
-#         gdf_cores.geometry.within(poly)]
-#     cores_Gaccum = core_ACCUM[cores_group.index].loc[
-#             accum_group.index[0]:]
-#     core_comp = cores_Gaccum.mean(axis=1)
-#     core_count = cores_Gaccum.notna().sum(axis=1)
-    
-#     fig, (ax1, ax2) = plt.subplots(2, 1)
-#     fig.suptitle(
-#         'Grid Group '+alpha_dict[i]+' time series')
-#     accum_group.plot(ax=ax1, color=G_cmap[group], 
-#     label='_hidden_')
-#     core_comp.plot(
-#         ax=ax1, color='grey', linewidth=2, 
-#         linestyle='--')
-#     count_group.plot(ax=ax2, color=G_cmap[group])
-#     ax1.get_legend().remove()
-#     ax1.set_xlim(
-#         [accum_BIG.index[0], 
-#         accum_BIG.index[-1]])
-#     ax1.set_ylabel('SMB (mm/a)')
-#     ax2.get_legend().remove()
-#     ax2.set_xlim(
-#         [accum_BIG.index[0], 
-#         accum_BIG.index[-1]])
-#     ax2.set_ylabel('# traces')
-
-#     if core_count.sum():
-#         ax3=ax2.twinx()
-#         core_count.plot(
-#             ax=ax3, color='grey', linewidth=2, 
-#             linestyle='--')
-#         ax3.set_ylabel('# Cores')
-#     plt.show()
 
 # %%
 
@@ -997,9 +850,6 @@ gdf_groups = gpd.GeoDataFrame(
     {'Group_ID': list(alpha_dict.values())[
         0:len(poly_groups)]}, 
     geometry=poly_groups, crs=gdf_BIG.crs)
-# gdf_groups = gpd.GeoDataFrame(
-#     {'Group_ID': alpha_dict.values()}, 
-#     geometry=poly_groups, crs=gdf_BIG.crs)
 
 bounds = {
     'x_range': tuple(gdf_BIG.total_bounds[0::2]), 
@@ -1110,17 +960,6 @@ accum_panel = hv.Layout(
         width=1000, height=1000, fontscale=2)
     + res_plt.opts(
         width=1000, height=1000, fontscale=2)).cols(2)
-
-# trend_panel = hv.Layout(
-#     trend_plt.opts(
-#         height=1000, width=1000, fontscale=2)
-#     + tMOE_plt.opts(
-#         height=1000, width=1000, fontscale=2)
-#     + trend_sig_plt.opts(
-#         height=1000, width=1000, fontscale=2)
-#     + coreALL_plt.opts(
-#         height=1000, width=1000, fontscale=2)).cols(
-#     2).redim.range(trend=(-10,10))
 
 trend_panel = hv.Layout(
     trend_plt.opts(
