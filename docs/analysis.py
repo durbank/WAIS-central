@@ -141,7 +141,7 @@ core_ACCUM = core_ACCUM[gdf_cores.index]
 # %%
 
 # Combine trace time series based on grid cells
-grid_res = 1000
+grid_res = 2500
 tmp_grids = pts2grid(gdf_traces, resolution=grid_res)
 (gdf_grid_ALL, accum_grid_ALL, 
     MoE_grid_ALL, yr_count_ALL) = trace_combine(
@@ -992,13 +992,13 @@ BIG_panel = hv.Layout(
 
 if grid_res==2500:
     hv.save(accum_panel, ROOT_DIR.joinpath(
-        'docs/Figures/accum_panel.png'))
+        'docs/Figures/accum_maps.png'))
     hv.save(trend_panel, ROOT_DIR.joinpath(
-        'docs/Figures/trend_panel.png'))
+        'docs/Figures/trend_maps.png'))
     hv.save(trendPERC_panel, ROOT_DIR.joinpath(
-        'docs/Figures/trendPERC_panel.png'))
+        'docs/Figures/trendPERC_maps.png'))
     hv.save(BIG_panel, ROOT_DIR.joinpath(
-        'docs/Figures/BIG_panel.png'))
+        'docs/Figures/BIG_maps.png'))
     
     BigTS_fig.savefig(fname=ROOT_DIR.joinpath(
         'docs/Figures/BigTS_fig.svg'))
