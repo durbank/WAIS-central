@@ -12,11 +12,11 @@ import matplotlib.pyplot as plt
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
-from bokeh.io import output_notebook
-from shapely.geometry import Point
-output_notebook()
-hv.extension('bokeh')
-gv.extension('bokeh')
+from shapely.geometry import Point, Polygon
+# from bokeh.io import output_notebook
+# output_notebook()
+hv.extension('bokeh', 'matplotlib')
+gv.extension('bokeh', 'matplotlib')
 
 # Set project root directory
 ROOT_DIR = Path('/home/durbank/Documents/Research/Antarctica/WAIS-central/')
@@ -34,8 +34,8 @@ from my_functions import *
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
 
 # Import Antarctic outline shapefile
-ant_path = ROOT_DIR.joinpath(
-    'data/Ant_basemap/Coastline_medium_res_polygon.shp')
+ant_path = DATA_DIR.joinpath(
+    'Ant_basemap/Coastline_medium_res_polygon.shp')
 ant_outline = gpd.read_file(ant_path)
 
 # %%
@@ -54,69 +54,120 @@ new_row = core_ALL.notna().sum()
 new_row.name = 'Duration'
 core_meta = core_meta.append(new_row)
 
-
-core_ALL = core_ALL.transpose()
+# Flip to get results in tidy-compliant form
 core_meta = core_meta.transpose()
 core_meta.index.name = 'Name'
-# %%
+# core_ALL = core_ALL.transpose()
+
+# Convert to geodf and reproject to 3031
 core_locs = gpd.GeoDataFrame(
     data=core_meta.drop(['Lat', 'Lon'], axis=1), 
     geometry=gpd.points_from_xy(
         core_meta.Lon, core_meta.Lat), 
     crs='EPSG:4326')
-core_locs = core_locs.to_crs('EPSG:3031')
+core_locs.to_crs('EPSG:3031', inplace=True)
 
-# %%
-data_list = [dir for dir in DATA_DIR.glob('gamma/*/')]
-print(f"Removed {data_list.pop(2)} from list")
-print(f"Removed {data_list.pop(-1)} from list")
-print(f"Removed {data_list.pop(2)} from list")
+# # Define core bounding box
+# bbox = Polygon(
+#     [[-2.41E6,1.53E6], [-2.41E6,-7.78E5],
+#     [-4.70E5,-7.78E5], [-4.70E5,1.53E6]])
+
+# # Subset core results to region of interest
+# keep_idx = core_locs.within(bbox)
+# gdf_cores = core_locs.loc[keep_idx,:]
+# core_ACCUM = core_ALL.loc[:,keep_idx].sort_index()
+
+gdf_cores = core_locs.copy()
+core_ACCUM = core_ALL.sort_index()
+
+# # Remove cores with less than 5 years of data
+# gdf_cores = gdf_cores.query('Duration >= 10')
+
+# # Remove cores with missing elev data
+# # (this only gets rid of Ronne ice shelf cores)
+# gdf_cores = gdf_cores[gdf_cores['Elev'].notna()]
+
+# # Remove specific unwanted cores
+# gdf_cores.drop('SEAT-10-4', inplace=True)
+# gdf_cores.drop('BER11C95_25', inplace=True)
+# gdf_cores.drop('SEAT-11-1', inplace=True)
+# gdf_cores.drop('SEAT-11-2', inplace=True)
+# gdf_cores.drop('SEAT-11-3', inplace=True)
+# gdf_cores.drop('SEAT-11-4', inplace=True)
+# gdf_cores.drop('SEAT-11-6', inplace=True)
+# gdf_cores.drop('SEAT-11-7', inplace=True)
+# gdf_cores.drop('SEAT-11-8', inplace=True)
+
+# Remove additional cores from core time series
+core_ACCUM = core_ACCUM[gdf_cores.index]
+
+#%% Import and format PAIPR-generated results
+
+# Import raw data
+data_list = [
+    folder for folder in 
+    DATA_DIR.joinpath('PAIPR-outputs').glob('*')]
 data_raw = pd.DataFrame()
-for dir in data_list:
-    data = import_PAIPR(dir)
+for folder in data_list:
+    data = import_PAIPR(folder)
     data_raw = data_raw.append(data)
 
 # Remove results for below QC data reliability
-data_0 = data_raw[
-    data_raw.Year > data_raw.QC_yr].sort_values(
-        ['collect_time', 'Year'])
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
 
-# # Subset data into QC flags 0, 1, and 2
-# data_0 = data_raw[data_raw['QC_flag'] == 0]
-# data_1 = data_raw[data_raw['QC_flag'] == 1]
-# # data_2 = data_raw[data_raw['QC_flag'] == 2]
+# Format and sort results for further processing
+data_form = format_PAIPR(data_0)
 
-# # Remove data_1 values earlier than assigned QC yr, 
-# # and recombine results with main data results
-# data_1 = data_1[data_1.Year >= data_1.QC_yr]
-# data_0 = data_0.append(data_1).sort_values(
-#     ['collect_time', 'Year'])
-
-#%%
-# Format accumulation data
-accum_long = format_PAIPR(
-    data_0, start_yr=1975, end_yr=2010).drop(
-        'elev', axis=1)
-traces = accum_long.groupby('trace_ID')
-
-# New accum and std dfs in wide format
-accum = accum_long.pivot(
+# Create time series arrays for annual accumulation 
+# and error
+accum_ALL = data_form.pivot(
     index='Year', columns='trace_ID', values='accum')
-accum_std = accum_long.pivot(
+std_ALL = data_form.pivot(
     index='Year', columns='trace_ID', values='std')
 
-# Create df for mean annual accumulation
-accum_trace = traces.aggregate(np.mean).drop('Year', axis=1)
-accum_trace = gpd.GeoDataFrame(
-    accum_trace, geometry=gpd.points_from_xy(
-        accum_trace.Lon, accum_trace.Lat), 
-    crs="EPSG:4326").drop(['Lat', 'Lon'], axis=1)
+# Create gdf of mean results for each trace and 
+# transform to Antarctic Polar Stereographic
+gdf_traces = long2gdf(data_form)
+gdf_traces.to_crs(epsg=3031, inplace=True)
 
-# Convert accum crs to same as Antarctic outline
-accum_trace = accum_trace.to_crs(ant_outline.crs)
+# %% PAIPR data aggregation by grid
 
-# Drop original index values
-accum_trace = accum_trace.drop('index', axis=1)
+# Combine trace time series based on grid cells
+grid_res = 1000
+tmp_grids = pts2grid(gdf_traces, resolution=grid_res)
+(gdf_grid_ALL, accum_grid_ALL, 
+    MoE_grid_ALL, yr_count_ALL) = trace_combine(
+    tmp_grids, accum_ALL, std_ALL)
+
+# %% Subset results to standard time period
+
+# Set start and end years
+yr_start = 1979
+yr_end = 2009
+
+# Subset PAIPR data
+keep_idx = np.invert(
+    accum_grid_ALL.loc[yr_start:yr_end,:].isnull().any())
+accum_grid = accum_grid_ALL.loc[yr_start:yr_end,keep_idx]
+MoE_grid = MoE_grid_ALL.loc[yr_start:yr_end,keep_idx]
+gdf_grid = gdf_grid_ALL.copy().loc[keep_idx,:]
+gdf_grid['accum'] = accum_grid.mean()
+gdf_grid['MoE'] = MoE_grid.mean()
+
+# Subset cores to same time period
+keep_idx = np.invert(
+    core_ACCUM.loc[yr_start:yr_end,:].isnull().any())
+accum_core = core_ACCUM.loc[yr_start:yr_end,keep_idx]
+gdf_core = gdf_cores.copy().loc[keep_idx,:]
+gdf_core['accum'] = accum_core.mean()
+
+# %% Autocorrelation analysis
+
+# core_acf = acf(accum_core)
+# core_acf.plot()
 
 #%% [markdown]
 # ## Time series spectral analysis
@@ -128,56 +179,9 @@ accum_trace = accum_trace.drop('index', axis=1)
 # All results are for the consistent time span of 1979-2010.
 #  
 # %%
-# Subset core accum to same time period as radar
-core_accum = core_ALL.transpose()
-core_accum = core_accum[
-    core_accum.index.isin(
-        np.arange(1975,2010))].iloc[::-1]
-core_accum = core_accum.iloc[
-    :,(core_accum.isna().sum() <= 0).to_list()]
-core_accum.columns.name = 'Core'
 
-# Extract core locations for remaing cores
-core_df_set = core_locs.loc[core_accum.columns]
-
-
-
-
-
-# %%
-## Autocorrelation analysis
-
-core_acf = acf(core_accum)
-core_acf.plot()
-
-
-
-
-
-
-# %%
-## Orientation plot showing location of data
-
-radar_plt = gv.Points(
-    accum_trace.sample(1000), crs=ANT_proj).opts(
-        projection=ANT_proj, color='red')
-core_plt = gv.Points(
-    core_df_set, crs=ANT_proj, vdims=['Core']).opts(
-        projection=ANT_proj, color='blue', size=5, 
-        tools=['hover'])
-Ant_bnds = gv.Shape.from_shapefile(
-    str(ant_path), crs=ANT_proj).opts(
-    projection=ANT_proj, width=500, height=500)
-(Ant_bnds * radar_plt * core_plt)
-
-# %%[markdown]
-# The above plot shows the locations of data used.
-# Only cores (blue) and radar results (red) covering the same consistent time period (1979-2010) are used.
-# Note that some of the cores cover dispersed locations in East Antarctica, but are included here to show diversity in core results compared to the range in radar.
-#  
-# %%
 # Detrend and normalize data
-core_array = signal.detrend(core_accum)
+core_array = signal.detrend(accum_core)
 core_array = (
     (core_array - core_array.mean(axis=0)) 
     / core_array.std(axis=0))
@@ -188,7 +192,7 @@ fs_core, Pxx_core = signal.welch(
 
 core_results = pd.DataFrame(
     Pxx_core, index=fs_core, 
-    columns=core_accum.columns)
+    columns=accum_core.columns)
 
 ds_core = hv.Dataset(
     (np.arange(Pxx_core.shape[1]), 
@@ -200,9 +204,9 @@ plt_core = ds_core.to(
 # plt_core = ds_core.to(
 #     hv.Image, ['Core', 'Frequency']).hist()
 
-tmp_range = np.arange(0,core_accum.shape[1])
+tmp_range = np.arange(0,accum_core.shape[1])
 x_ticks = [
-    (int(_), core_accum.columns[_]) 
+    (int(_), accum_core.columns[_]) 
     for _ in tmp_range
 ]
 plt_core.opts(
@@ -213,12 +217,10 @@ plt_core.opts(
 # Plot of power spectral density for firn/ice cores.
 # Although the results are pretty varied, in general there seems to be more dominant periodicities near ~6 years, with additional peaks near 17 years and 2 years.
 # Talos Dome has the strongest periodic signal at ~4 years.
-#   
-# %%
-## Calculate power specta for accum time series (both radar results and cores)
+#  
+# %% Calculate power specta radar time series
 
-accum_tsa = accum.iloc[:,::40]
-# accum_tsa = accum
+accum_tsa = accum_grid
 
 # Detrend and normalize data
 accum_array = signal.detrend(accum_tsa)
@@ -245,15 +247,16 @@ plt_accum.opts(width=950, height=600, colorbar=True)
 
 #%%[markdown]
 # Plot showing the PSD for radar trace time series.
-# To aid in plotting, only the results for traces every 1 km along the flightline are shown.
 # Most of the power is concentrated in lower frequencies, with time series peaks ranging in periodicity from ~17 years to ~6 years, with the greatest concentration at ~13 year period.
 # 
 # **Question:** *Why am I getting results for periodicities greater than 1/2 the interval of interest? I would assume we could only measure repeat periodicity with period length <= 1/2 the total record interval, but maybe it's able to reconstruct results based off of partial periods? I also know Welch's method performs overlapping periodograms, so there is an averaging component to it that perhaps causes this? Related to this, I know we can get "spectral leakage" due to non-integer number of cycles in the record, but would this manifest as peaks past the 1/2 record length point? I suppose I would like some help/guidance on reviewing spectral analysis and interpreting the results...*
-# '
+# 
 # **Question:** *Additionally, I'm not sure the best way to compare the relative power in the spectral densities between the cores and the radar results (or even between one time series to the next of the same data type). My instinct is that these cannot be directly compared using the PSD magnitudes, but the relative strength of a peak in an individual time series compared to the corresponding lesser peaks within the same record can be used to infer how strongly a signal is periodic relative to other time series. I'm not actually sure about this and either need some direction or more research into it.*
-# %%
+# 
+# %% Power spectra for white noise
+
 # Compare results to white noise with the same mean and std of the detrended accum time series
-ts_data = signal.detrend(accum.iloc[:,::40], axis=0)
+ts_data = signal.detrend(accum_grid, axis=0)
 df_test = np.random.normal(
     ts_data.mean(axis=0), ts_data.std(axis=0), 
     ts_data.shape)
@@ -266,7 +269,7 @@ fs_noise, Pxx_noise = signal.welch(df_norm, axis=0)
 
 noise_results = pd.DataFrame(
     Pxx_noise, index=fs_noise, 
-    columns=accum.iloc[:,::40].columns)
+    columns=accum_grid.columns)
 
 ds_noise = hv.Dataset(
     (np.arange(Pxx_noise.shape[1]), 
@@ -280,9 +283,10 @@ noise_plt.opts(width=950, height=600, colorbar=True)
 #%%[markdown]
 # Plot of PSD for white noise (as a comparison for results from the radar).
 # The synthetic time series were generated from the detrended radar time series means and standard deviations, and were then normalized using the same methods as for the radar results.
-# The major takeaway here is that the radar results express obvious patterns that I believe are beyond what we would expect from random noise.
+# The major takeaway here is that the radar results express obvious patterns (specifically in the lower frequencies) that I believe are beyond what we would expect from random noise.
 #  
 # %%
+
 ax = plt.subplot(111)
 plt.plot(
     fs_core, Pxx_core.mean(axis=1), color='blue', 
@@ -293,33 +297,14 @@ plt.plot(
 plt.xlabel('Freqency (cycles/yr)')
 plt.ylabel('Mean power density')
 plt.legend(loc='best')
-#%% [markdown]
-# ## Spatial plots of PSD results
-# 
-# Below are plots of core and radar time series spatially plotted (in Polar Stereographic projection).
-# This is still something of a work in progress, but should give some idea as to how spatially coherent/divergent the time series results are.
-#  
-# %%
-# 3D plot of time series analysis
+
+# %% 3D plot of core power spectra
+
 import plotly.express as px
-loc_tmp = core_locs.loc[core_accum.columns]
+loc_tmp = core_locs.loc[accum_core.columns]
 E_core = loc_tmp.geometry.x
 N_core = loc_tmp.geometry.y
 
-# tmp_core = fs_core
-# tmp_core[tmp_core <= 0] = 1
-# P_core = 1 / tmp_core
-# df_core = pd.DataFrame(
-#     {'Easting': E_core.repeat(Pxx_core.shape[0]), 
-#     'Northing': N_core.repeat(Pxx_core.shape[0]), 
-#     'Period': np.tile(P_core, E_core.shape[0]), 
-#     'Power': Pxx_core.reshape(
-#         Pxx_core.size, 1).squeeze()})
-# fig = px.scatter_3d(
-#     df_core, 
-#     x='Easting', y='Northing', z='Period', 
-#     color='Power', color_continuous_scale='viridis', 
-#     width=950, height=600)
 df_core = pd.DataFrame(
     {'Easting': E_core.repeat(Pxx_core.shape[0]), 
     'Northing': N_core.repeat(Pxx_core.shape[0]), 
@@ -333,13 +318,10 @@ fig = px.scatter_3d(
     width=950, height=600)
 fig.show()
 
-# %%[markdown]
-# This shows the core spectral results spatially.
-#  
-#%%
-loc_tmp = accum_trace.loc[accum_tsa.columns]
-E_accum = loc_tmp.geometry.x
-N_accum = loc_tmp.geometry.y
+#%% 3D plot of radar power spectra
+
+E_accum = gdf_grid.geometry.centroid.x
+N_accum = gdf_grid.geometry.centroid.y
 df_accum = pd.DataFrame(
     {'Easting': E_accum.repeat(Pxx_accum.shape[0]), 
     'Northing': N_accum.repeat(Pxx_accum.shape[0]), 
@@ -354,11 +336,8 @@ fig = px.scatter_3d(
     opacity=1, width=950, height=600)
 fig.show()
 
-# %%[markdown]
-# This shows the radar spectral results spatially (again subsetted to every 1 km to aid in viewing).
-#  
-#%%
-## Plots of max periodicity estimate and max power
+# %% Plots of max periodicity estimate and max power
+
 # Index of max spectral power
 max_idx = accum_results.idxmax()
 
@@ -372,16 +351,13 @@ periods[np.isinf(periods)] = 0
 psd_max = accum_results.max()
 
 
-loc_tmp = accum_trace.loc[accum_tsa.columns]
-E_accum = loc_tmp.geometry.x
-N_accum = loc_tmp.geometry.y
-
 df_power = pd.DataFrame(
     {'Easting': E_accum, 'Northing': N_accum, 
     'Max period': periods, 'Max power': psd_max})
 
 clipping = {
     'min': 'black', 'max': 'gray', 'NaN': 'gray'}
+
 plt_max = hv.Points(
     df_power, kdims=['Easting', 'Northing'], 
     vdims=[
@@ -398,3 +374,4 @@ plt_max.opts(
 # The above plot shows the radar trace time series analysis results, with the color representing the dominant period in each record and the size representing the relative power of that frequency.
 # I've clipped the results to 2/3 of the total record duration (20 years) so grey circles represent periods longer than this.
 #  
+# %%
