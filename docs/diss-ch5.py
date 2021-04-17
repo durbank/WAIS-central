@@ -224,9 +224,10 @@ x_ticks = [
     (int(_), accum_core.columns[_]) 
     for _ in tmp_range
 ]
-plt_core.opts(
+
+plt_core = plt_core.opts(
     xticks=x_ticks, xrotation=90, 
-    width=950, height=600, colorbar=True)
+    width=1000, height=600, colorbar=True)
 
 #%% [markdown]
 # Plot of power spectral density for firn/ice cores.
@@ -258,7 +259,8 @@ ds_accum = hv.Dataset(
 
 plt_accum = ds_accum.to(
     hv.Image, ['Trace_ID', 'Frequency'])
-plt_accum.opts(width=950, height=600, colorbar=True)
+plt_accum = plt_accum.opts(
+    width=1000, height=600, colorbar=True)
 
 #%%[markdown]
 # Plot showing the PSD for radar trace time series.
@@ -293,7 +295,8 @@ ds_noise = hv.Dataset(
 
 noise_plt = ds_noise.to(
     hv.Image, ['Trace_ID', 'Frequency'])
-noise_plt.opts(width=950, height=600, colorbar=True)
+noise_plt = noise_plt.opts(
+    width=1000, height=600, colorbar=True)
 
 #%%[markdown]
 # Plot of PSD for white noise (as a comparison for results from the radar).
@@ -311,16 +314,19 @@ ax.violinplot(
 
 # %%
 
-ax = plt.subplot(111)
-plt.plot(
+plt.rcParams.update({'font.size': 18})
+P_fig, ax = plt.subplots()
+P_fig.set_figheight(6)
+P_fig.set_figwidth(10)
+ax.plot(
     fs_core, np.median(Pxx_core, axis=1), color='blue', 
     label='Ice cores')
-plt.plot(
+ax.plot(
     fs_accum, np.median(Pxx_accum, axis=1), color='red', 
     label='Radar traces')
-plt.xlabel('Freqency (cycles/yr)')
-plt.ylabel('Mean power density')
-plt.legend(loc='best')
+ax.set_xlabel('Freqency (cycles/yr)')
+ax.set_ylabel('Mean power density')
+ax.legend(loc='best')
 
 # %% 3D plot of core power spectra
 
@@ -398,4 +404,19 @@ plt_max.opts(
 # The above plot shows the radar trace time series analysis results, with the color representing the dominant period in each record and the size representing the relative power of that frequency.
 # I've clipped the results to 2/3 of the total record duration (20 years) so grey circles represent periods longer than this.
 #  
+# %% Format generated plots
+
+Pxx_plts = hv.Layout(
+    plt_accum.opts(fontscale=2) 
+    + noise_plt.opts(fontscale=2)
+    + plt_core.opts(fontscale=2)).cols(2)
+
+# %%
+
+hv.save(Pxx_plts, ROOT_DIR.joinpath(
+    'docs/Figures/Pxx_plts.png'))
+
+P_fig.savefig(ROOT_DIR.joinpath(
+    'docs/Figures/Pxx_fig.svg'))
+
 # %%
