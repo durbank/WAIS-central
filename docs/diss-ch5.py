@@ -67,18 +67,17 @@ core_locs = gpd.GeoDataFrame(
     crs='EPSG:4326')
 core_locs.to_crs('EPSG:3031', inplace=True)
 
-# # Define core bounding box
-# bbox = Polygon(
-#     [[-2.41E6,1.53E6], [-2.41E6,-7.78E5],
-#     [-4.70E5,-7.78E5], [-4.70E5,1.53E6]])
+# Define core bounding box
+bbox = Polygon(
+    [[-2.41E6,1.53E6], [-2.41E6,-7.78E5],
+    [-4.70E5,-7.78E5], [-4.70E5,1.53E6]])
 
-# # Subset core results to region of interest
-# keep_idx = core_locs.within(bbox)
-# gdf_cores = core_locs.loc[keep_idx,:]
-# core_ACCUM = core_ALL.loc[:,keep_idx].sort_index()
-
-gdf_cores = core_locs.copy()
-core_ACCUM = core_ALL.sort_index()
+# Subset core results to region of interest
+keep_idx = core_locs.within(bbox)
+gdf_cores = core_locs.loc[keep_idx,:]
+core_ACCUM = core_ALL.loc[:,keep_idx].sort_index()
+# gdf_cores = core_locs.copy()
+# core_ACCUM = core_ALL.sort_index()
 
 # # Remove cores with less than 5 years of data
 # gdf_cores = gdf_cores.query('Duration >= 10')
@@ -146,7 +145,7 @@ tmp_grids = pts2grid(gdf_traces, resolution=grid_res)
 
 # Set start and end years
 yr_start = 1979
-yr_end = 2009
+yr_end = 2010
 
 # Subset PAIPR data
 keep_idx = np.invert(
@@ -168,6 +167,22 @@ gdf_core['accum'] = accum_core.mean()
 
 # core_acf = acf(accum_core)
 # core_acf.plot()
+
+# %%
+## Orientation plot showing location of data
+
+radar_plt = gv.Points(
+    gdf_grid, crs=ANT_proj).opts(
+        projection=ANT_proj, color='red')
+core_plt = gv.Points(
+    gdf_core, crs=ANT_proj, 
+    vdims=['Name', 'Duration']).opts(
+        projection=ANT_proj, color='blue', size=5, 
+        marker='triangle', tools=['hover'])
+Ant_bnds = gv.Shape.from_shapefile(
+    str(ant_path), crs=ANT_proj).opts(
+    projection=ANT_proj, width=700, height=700)
+(Ant_bnds * radar_plt * core_plt)
 
 #%% [markdown]
 # ## Time series spectral analysis
@@ -285,14 +300,23 @@ noise_plt.opts(width=950, height=600, colorbar=True)
 # The synthetic time series were generated from the detrended radar time series means and standard deviations, and were then normalized using the same methods as for the radar results.
 # The major takeaway here is that the radar results express obvious patterns (specifically in the lower frequencies) that I believe are beyond what we would expect from random noise.
 #  
+# %% Violin plots of power spectra
+
+# fig, axes = plt.figure(figsize=(6,9))
+ax = plt.subplot(111)
+ax.violinplot(
+    Pxx_core.transpose(), showmedians=True)
+ax.violinplot(
+    Pxx_accum.transpose(), showmedians=True)
+
 # %%
 
 ax = plt.subplot(111)
 plt.plot(
-    fs_core, Pxx_core.mean(axis=1), color='blue', 
+    fs_core, np.median(Pxx_core, axis=1), color='blue', 
     label='Ice cores')
 plt.plot(
-    fs_accum, Pxx_accum.mean(axis=1), color='red', 
+    fs_accum, np.median(Pxx_accum, axis=1), color='red', 
     label='Radar traces')
 plt.xlabel('Freqency (cycles/yr)')
 plt.ylabel('Mean power density')
