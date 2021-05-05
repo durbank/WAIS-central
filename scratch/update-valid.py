@@ -196,7 +196,7 @@ def plot_TScomp(
         ncols=2, nrows=2, 
         # ncols=1, nrows=len(site_list), 
         constrained_layout=True, 
-        figsize=(16,12))
+        figsize=(21,12))
         # figsize=(6,24))
 
     for i, site in enumerate(site_list):
