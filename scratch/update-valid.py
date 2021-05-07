@@ -209,7 +209,7 @@ def plot_TScomp(
 
         # Plot core data
         df_core.plot(
-            ax=fig.axes[i], color='black', linewidth=3, 
+            ax=fig.axes[i], color='black', linewidth=4, 
             linestyle=':', label=labels[2])
 
         # Check if errors for time series 1 are provided
@@ -220,7 +220,7 @@ def plot_TScomp(
             # Plot ts1 and mean errors
             df1.mean(axis=1).plot(
                 ax=fig.axes[i], color=colors[0], 
-                linewidth=2, label=labels[0])
+                linewidth=4, label=labels[0])
             (df1.mean(axis=1)+df_err1.mean(axis=1)).plot(
                 ax=fig.axes[i], color=colors[0], 
                 linestyle='--', label='__nolegend__')
@@ -232,7 +232,7 @@ def plot_TScomp(
             # standard deviation of annual estimates
             df1.mean(axis=1).plot(
                 ax=fig.axes[i], color=colors[0], 
-                linewidth=2, label=labels[0])
+                linewidth=4, label=labels[0])
             (df1.mean(axis=1)+df1.std(axis=1)).plot(
                 ax=fig.axes[i], color=colors[0], 
                 linestyle='--', label='__nolegend__')
@@ -395,5 +395,32 @@ one2one_plts = (
     + one2one.opts(color='black')*scatter_1
     + one2one.opts(color='black')*scatter_2
 )
+
+
+
+
+# %% Subset results to matched pairs for cores only
+
+# Find nearest neighbors between paipr and manual 
+# (within 500 m)
+df_dist = nearest_neighbor(
+    gdf_cores, gdf_paipr, return_dist=True)
+idx_paipr = df_dist['distance'] <= 6000
+dist_overlap = df_dist[idx_paipr]
+
+# Create arrays for relevant results
+accum_paipr = paipr_ALL.iloc[:,dist_overlap['trace_ID']]
+std_paipr = std_ALL.iloc[:,dist_overlap['trace_ID']]
+
+
+
+cores = accum_cores.loc[2010:1980].iloc[::-1]
+
+paipr_res = pd.DataFrame(
+    accum_paipr.values-cores.values,
+    index=accum_paipr.index)
+
+print(f"Mean PAIPR-core bias: {100*paipr_res.iloc[:,1::].values.mean()/accum_paipr.values.mean():.1f}%")
+print(f"Mean PAIPR-core RMSE: {100*paipr_res.iloc[:,1::].values.std()/cores.values.mean():.0f}%")
 
 # %%
