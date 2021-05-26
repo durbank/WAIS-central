@@ -998,7 +998,34 @@ for site in np.unique(PAIPR_df.Site):
     p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
     moe_val.append(crit_i*SE_i)
 
-    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}+/-{crit_i*SE_i:.2f}")
+    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
+
+print(p_val)
+print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
+
+# %% Paired t tests for PAIPR (averaged by year)
+
+from scipy import stats
+
+val_bias = []
+t_stat = []
+t_crit = []
+p_val = []
+moe_val = []
+for site in np.unique(PAIPR_df.Site):
+
+    data_i = PAIPR_df.query('Site == @site').groupby('Year').mean()
+    SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
+    t_i = abs(data_i['res_perc'].mean()/SE_i)
+    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+
+    val_bias.append(data_i['res_perc'].mean())
+    t_stat.append(t_i)
+    t_crit.append(crit_i)
+    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    moe_val.append(crit_i*SE_i)
+
+    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
 
 print(p_val)
 print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
@@ -1025,7 +1052,7 @@ for site in np.unique(man_df.Site):
     p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
     moe_val.append(crit_i*SE_i)
 
-    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}+/-{crit_i*SE_i:.2f}")
+    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
 
 print(p_val)
 print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
