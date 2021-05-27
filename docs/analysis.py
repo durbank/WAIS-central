@@ -12,12 +12,14 @@ import matplotlib.gridspec as gridspec
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
+from cartopy import feature as cf
 from bokeh.io import output_notebook
 output_notebook()
 hv.extension('bokeh')
 gv.extension('bokeh')
 from shapely.geometry import Polygon, Point
 import xarray as xr
+from xrspatial import hillshade
 
 # hv.archive.auto()
 
@@ -37,10 +39,15 @@ from my_functions import *
 ANT_proj = ccrs.SouthPolarStereo(
     true_scale_latitude=-71)
 
-# Define Antarctic boundary file
-shp = str(ROOT_DIR.joinpath(
-    'data/Ant_basemap/Coastline_medium_res_polygon.shp'))
-gdf_ANT = gpd.read_file(shp)
+# # Define Antarctic boundary file
+# shp = str(ROOT_DIR.joinpath(
+#     'data/Ant_basemap/Coastline_medium_res_polygon.shp'))
+
+# Create Antarctic coastline polygon
+world = gpd.read_file(
+    gpd.datasets.get_path('naturalearth_lowres'))
+Ant = world.query('continent=="Antarctica"')
+Ant = Ant.to_crs(epsg=3031)
 
 # Define Antarctic DEM file
 xr_DEM = xr.open_rasterio(
@@ -223,7 +230,8 @@ gdf_long['accum'] = cores_long.mean()
 # Create size variable based on number of years in record
 tmp = np.invert(
     cores_long.isna()).sum()
-gdf_long['size'] = 20*tmp/tmp.max()
+tmp = np.exp((tmp-tmp.min())/tmp.max())
+gdf_long['size'] = 10*tmp
 
 # Calculate trends in cores
 trends, _, lb, ub = trend_bs(cores_long, 1000)
@@ -266,12 +274,26 @@ radar_bnds = gv.Polygons(
         line_width=3, color=None)
 
 # Antarctica boundaries
-Ant_bnds = gv.Shape.from_shapefile(
-    shp, crs=ANT_proj).opts(
-        projection=ANT_proj, color='silver')
+Ant_bnds = gv.Polygons(
+    Ant, crs=ANT_proj).opts(
+        projection=ANT_proj, color='gray', 
+        line_color=None)
+# Ant_bnds = gv.Shape.from_shapefile(
+#     shp, crs=ANT_proj).opts(
+#         projection=ANT_proj, color='silver')
+
+# Lat/lon lines for inset
+cf_big_grat = cf.NaturalEarthFeature(
+    category='physical',
+    name='graticules_15',
+    scale='110m')
+grats_big = gv.Feature(
+    cf_big_grat, group='Lines').opts(
+        gv.opts.Feature('Lines', projection=ANT_proj))
+
 
 # Create inset map
-inset_map = (Ant_bnds * radar_bnds).opts(
+inset_map = (Ant_bnds * radar_bnds * grats_big).opts(
     width=700, height=700, bgcolor='lightsteelblue')
 
 # %%
@@ -284,6 +306,10 @@ xr_DEM = xr_DEM.sel(
 # Generate elevation contours plot
 elev_plt = hv.Image(xr_DEM.values, bounds=poly_bnds.bounds)
 cont_plt = hv.operation.contours(elev_plt, levels=15)
+
+# Generate elevation hillshade
+xr_HS = hillshade(xr_DEM)
+hill_plt = hv.Image(xr_HS.values, bounds=poly_bnds.bounds)
 
 # %% Plot mean accumulation
 
@@ -385,7 +411,8 @@ sig_pltALL = (
 # %% Final formatting for above plots
 
 trend_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False)
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
+    # elev_plt.opts(cmap='dimgray', colorbar=False)
         # * cont_plt.opts(cmap='dimgray')
     * t_plt
     * core_t_plt.redim.range(trend=(-15,15))).opts(
@@ -394,14 +421,14 @@ trend_plt = (
         ylim=gdf_bounds['y_range'])
 
 trend_sig_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False) 
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
     * sig_pltALL).opts(
         width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range'])
 
 tMOE_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False) 
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
     * tERR_plt).opts(
         width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
@@ -431,7 +458,8 @@ core_tPERC_plt = gv.Points(
         marker='triangle', tools=['hover'])
 
 trendPERC_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False)
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
+    # elev_plt.opts(cmap='dimgray', colorbar=False)
     * tPERC_plt
     * core_tPERC_plt).opts(
         width=700, height=700, 
@@ -513,7 +541,8 @@ duration_plt = gv.Polygons(
 # %% Final formating of above plots
 
 AllAccum_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False)
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
+    # elev_plt.opts(cmap='dimgray', colorbar=False)
     * (aALL_plt*accum_core_plt).redim.range(
         accum=(ac_min,ac_max))
     ).opts(
@@ -522,7 +551,7 @@ AllAccum_plt = (
         ylim=gdf_bounds['y_range'])
 
 ALLduration_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False)
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
     * duration_plt).opts(
         width=700, height=700, 
         xlim=gdf_bounds['x_range'], 
@@ -531,7 +560,8 @@ ALLduration_plt = (
 # %% 1979-2010 accum plot
 
 accum1979_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False)
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
+    # elev_plt.opts(cmap='dimgray', colorbar=False)
     * (accum_plt*accum_core_plt).redim.range(
         accum=(250,500))
     ).opts(
@@ -565,12 +595,14 @@ res_min = np.quantile(res_gdf.res_accum, 0.01)
 res_max = np.quantile(res_gdf.res_accum, 0.99)
 
 res_plt = (
-    elev_plt.opts(cmap='dimgray', colorbar=False)
-    * res_tmp.redim.range(res_accum=(res_min,res_max))
+    # hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
+    # elev_plt.opts(cmap='dimgray', colorbar=False)
+    res_tmp.redim.range(res_accum=(res_min,res_max))
     ).opts(
         width=700, height=700,  
         xlim=gdf_bounds['x_range'], 
-        ylim=gdf_bounds['y_range'])
+        ylim=gdf_bounds['y_range'], 
+        bgcolor='silver')
 
 # %% Data location map
 
@@ -588,9 +620,19 @@ core_plt = gv.Points(
         tools=['hover'])
 
 # Add to workspace
+grat_data = cf.NaturalEarthFeature(
+    category='physical',
+    name='graticules_5',
+    scale='110m')
+
+graticules = gv.Feature(grat_data, group='Lines').opts(
+        gv.opts.Feature('Lines', projection=ANT_proj))
+
 data_map = (
-    elev_plt.opts(cmap='dimgray', colorbar=True) 
+    hill_plt.opts(cmap='dimgray', alpha=0.33, colorbar=False)
+    # elev_plt.opts(cmap='dimgray', colorbar=True) 
     * radar_plt * core_plt
+    * graticules
     ).opts(
         xlim=gdf_bounds['x_range'], 
         ylim=gdf_bounds['y_range'], 
@@ -727,36 +769,36 @@ BigCount_plt = (
 
 # %% K-means clustering to create groups
 
-from sklearn.cluster import KMeans
+# from sklearn.cluster import KMeans
 
-norm_df = (
-    ((accum_BIG-accum_BIG.mean())
-    / accum_BIG.std()).T).loc[:,1979:2010]
-# norm_df = (accum_BIG.T)
-norm_df['East'] = (
-    gdf_BIG.centroid.x-gdf_BIG.centroid.x.mean()) \
-    / gdf_BIG.centroid.x.std()
-norm_df['North'] = (
-    gdf_BIG.centroid.y-gdf_BIG.centroid.y.mean()) \
-    / gdf_BIG.centroid.y.std()
+# norm_df = (
+#     ((accum_BIG-accum_BIG.mean())
+#     / accum_BIG.std()).T).loc[:,1979:2010]
+# # norm_df = (accum_BIG.T)
+# norm_df['East'] = (
+#     gdf_BIG.centroid.x-gdf_BIG.centroid.x.mean()) \
+#     / gdf_BIG.centroid.x.std()
+# norm_df['North'] = (
+#     gdf_BIG.centroid.y-gdf_BIG.centroid.y.mean()) \
+#     / gdf_BIG.centroid.y.std()
 
 
-norm_df[norm_df.isna()] = 0
+# norm_df[norm_df.isna()] = 0
 
-grp_pred = KMeans(
-    n_clusters=4, 
-    # n_clusters=3, 
-    random_state=0).fit_predict(norm_df)
-gdf_BIG['Group'] = grp_pred
-alpha_dict = {0: 'A', 1: 'B', 2: 'C', 3: 'D'}
-gdf_BIG.replace({'Group': alpha_dict}, inplace=True)
+# grp_pred = KMeans(
+#     n_clusters=4, 
+#     # n_clusters=3, 
+#     random_state=0).fit_predict(norm_df)
+# gdf_BIG['Group'] = grp_pred
+# alpha_dict = {0: 'A', 1: 'B', 2: 'C', 3: 'D'}
+# gdf_BIG.replace({'Group': alpha_dict}, inplace=True)
 
 # %%
 
 grp_A = [22, 23, 29, 35]
 grp_B = [27, 28, 33, 34, 39, 40]
-grp_C = [37, 38, 43, 49]
-grp_D = [19, 20, 21, 25, 26, 31, 32]
+grp_C = [19, 20, 21, 25, 26, 31, 32]
+grp_D = [37, 38, 43, 49]
 
 gdf_BIG['Group'] = ""
 
@@ -829,7 +871,7 @@ for i, group in enumerate(
     ax2.set_xlim(
         [accum_BIG.index[0], 
         accum_BIG.index[-1]])
-    ax2.set_ylabel('# traces')
+    ax2.set_ylabel('No. traces')
 
     BigTS_fig.add_subplot(ax1)
     BigTS_fig.add_subplot(ax2)
@@ -839,7 +881,7 @@ for i, group in enumerate(
         core_count.plot(
             ax=ax3, color='grey', linewidth=2, 
             linestyle='--')
-        ax3.set_ylabel('# Cores')
+        ax3.set_ylabel('No. Cores')
         BigTS_fig.add_subplot(ax3)
 
 # BigTS_fig.show()
@@ -868,7 +910,7 @@ grp_labs = hv.Labels(
         gdf_groups.geometry.centroid.y.values]).T, 
     'text': ['A', 'B', 'C', 'D']}, 
     ['x', 'y'], 'text').opts(
-        text_font_size='22pt', text_color='red')
+        text_font_size='48pt', text_color='darkred')
 
 # Big grid cell plot
 grid_plt = gv.Polygons(
@@ -936,7 +978,7 @@ if grid_res == 1000:
 
 # %%
 
-elev_plt = elev_plt.opts(colorbar=True)
+# elev_plt = elev_plt.opts(colorbar=True)
 data_map = data_map.opts(fontscale=2)
 data_panel = (inset_map + data_map)
 
@@ -949,7 +991,7 @@ if grid_res==2500:
 
 # %%
 
-elev_plt = elev_plt.opts(colorbar=False)
+# elev_plt = elev_plt.opts(colorbar=False)
 
 accum_panel = hv.Layout(
     AllAccum_plt.opts(
@@ -979,13 +1021,13 @@ trendPERC_panel = hv.Layout(
     t_perc=(-3,3))
 
 BIG_panel = hv.Layout(
-    trendBig_plt.opts(
+    group_map.opts(
+        height=1000, width=1000, fontscale=2)
+    + trendBig_plt.opts(
         height=1000, width=1000, fontscale=2)
     + moeBig_plt.opts(
         height=1000, width=1000, fontscale=2)
     + BigCount_plt.opts(
-        height=1000, width=1000, fontscale=2)
-    + group_map.opts(
         height=1000, width=1000, fontscale=2)).cols(2)
 
 # %% Only save plots if grid resolution is larger version
