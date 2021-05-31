@@ -603,4 +603,54 @@ def topo_vals(tile_dir, locations):
 
 
 
+def extract_at_pts(
+    xr_ds, gdf_pts, coord_names=['lon','lat'], 
+    return_dist=False, planet_radius=6371000):
+    """
+    Function where, given an xr-dataset and a Point-based geodataframe, 
+    extract all values of variables in xr-dataset at pixels nearest 
+    the given points in the geodataframe.
+    xr_ds {xarray.core.dataset.Dataset}: Xarray dataset containing variables to extract.
+    gdf_pts {geopandas.geodataframe.GeoDataFrame} : A Points-based geodataframe containing the locations at which to extract xrarray variables.
+    coord_names {list}: The names of the longitude and latitude coordinates within xr_ds.
+    return_dist {bool}: Whether function to append the distance (in meters) between the given queried points and the nearest raster pixel centroids. 
+    NOTE: This assumes the xr-dataset includes lon/lat in the coordinates 
+    (although they can be named anything, as this can be prescribed in the `coord_names` variable).
+    """
+    # Convert xr dataset to df and extract coordinates
+    xr_df = xr_ds.to_dataframe().reset_index()
+    xr_coord = xr_df[coord_names]
+
+    # Ensure gdf_pts is in lon/lat and extract coordinates
+    crs_end = gdf_pts.crs 
+    gdf_pts.to_crs(epsg=4326, inplace=True)
+    pt_coord = pd.DataFrame(
+        {'Lon': gdf_pts.geometry.x, 
+        'Lat': gdf_pts.geometry.y}).reset_index(drop=True)
+
+    # Convert lon/lat points to RADIANS for both datasets
+    xr_coord = xr_coord*np.pi/180
+    pt_coord = pt_coord*np.pi/180
+
+    # Find xr data nearest given points
+    xr_idx, xr_dist = get_nearest(pt_coord, xr_coord)
+
+    # Drop coordinate data from xr (leaves raster values)
+    cols_drop = list(dict(xr_ds.coords).keys())
+    xr_df_filt = xr_df.iloc[xr_idx].drop(
+        cols_drop, axis=1).reset_index(drop=True)
+    
+    # Add raster values to geodf
+    gdf_return = gdf_pts.reset_index(
+        drop=True).join(xr_df_filt)
+    
+    # Add distance between raster center and points to gdf
+    if return_dist:
+        gdf_return['dist_m'] = xr_dist * planet_radius
+    
+    # Reproject results back to original projection
+    gdf_return.to_crs(crs_end, inplace=True)
+
+    return gdf_return
+
     
