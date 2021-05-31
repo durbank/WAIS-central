@@ -84,6 +84,13 @@ std_ALL = data_form.pivot(
 gdf_traces = long2gdf(data_form)
 gdf_traces.to_crs(epsg=3031, inplace=True)
 
+
+# %% Get ice velocities of trace locations
+
+# xr_vice = xr.open_dataset(ROOT_DIR.joinpath(
+#     'data/ice-velocities/antarctica_ice_velocity_450m_v2.nc'))
+# xr_pts = extract_at_pts(xr_vice, gdf_traces, return_dist=True)
+
 # %% Import and format SAMBA cores
 
 # Import raw data
