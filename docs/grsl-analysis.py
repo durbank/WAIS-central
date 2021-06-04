@@ -19,6 +19,7 @@ gv.extension('bokeh', 'matplotlib')
 import panel as pn
 import seaborn as sns
 import xarray as xr
+from xrspatial import hillshade
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -139,31 +140,39 @@ chunk_centers = gpd.GeoDataFrame({
 plt_accum2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, size=1, 
-        bgcolor='silver', tools=['hover'], 
+        cmap='viridis', colorbar=True, size=10, 
+        # bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 plt_accum2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, size=1,
-        bgcolor='silver', tools=['hover'], 
+        cmap='viridis', colorbar=True, size=10,
+        # bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 
 plt_loc2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum','std']).opts(
         projection=ANT_proj, color='blue', alpha=0.9, 
-        size=5, bgcolor='silver', tools=['hover'], 
+        size=5, 
+        # bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 plt_loc2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum','std']).opts(
         projection=ANT_proj, color='red', alpha=0.9, 
-        size=5, bgcolor='silver', tools=['hover'], 
+        size=5, 
+        # bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 plt_locCOMB = gv.Points(
     gdf_PAIPR, crs=ANT_proj, 
     vdims=['accum_2011','accum_2016']).opts(
-        projection=ANT_proj, color='white', 
-        size=10, bgcolor='silver', tools=['hover'], 
+        projection=ANT_proj, color='orange', 
+        size=18, 
+        # bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 
 
@@ -172,7 +181,7 @@ plt_manPTS = gv.Points(
     chunk_centers, crs=ANT_proj, 
     vdims='Site').opts(
         projection=ANT_proj, color='black', 
-        size=15, marker='square')
+        size=30, marker='square')
 
 plt_labels = hv.Labels(
     {'x': chunk_centers.geometry.x.values, 
@@ -180,7 +189,7 @@ plt_labels = hv.Labels(
     'text': chunk_centers.Site.values}, 
     ['x','y'], 'text').opts(
         yoffset=20000, text_color='black', 
-        text_font_size='18pt')
+        text_font_size='28pt')
 
 # (
 #     plt_locCOMB * plt_manPTS 
@@ -212,6 +221,16 @@ tpl_bnds = (
 elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
     cmap='dimgray', colorbar=False, width=700, height=700)
 
+# Generate contour plot
+cont_plt = hv.operation.contours(elev_plt, levels=15).opts(
+    cmap='cividis', show_legend=False, 
+    colorbar=True, line_width=2)
+
+# Generate elevation hillshade
+xr_HS = hillshade(xr_DEM)
+hill_plt = hv.Image(xr_HS.values, bounds=tpl_bnds).opts(
+        alpha=0.25, cmap='gray', colorbar=False)
+
 # %% PAIPR residuals
 
 # Calculate residuals (as % bias of mean accumulation)
@@ -237,13 +256,15 @@ res_max = np.quantile(gdf_PAIPR.accum_res, 0.99)
 plt_accum = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_mu']).opts(
         projection=ANT_proj, color='accum_mu', 
-        bgcolor='silver', colorbar=True, cmap='viridis', 
+        # bgcolor='silver', 
+        colorbar=True, cmap='viridis', 
         tools=['hover'], width=700, height=700)
 
 plt_res = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
-        projection=ANT_proj, color='accum_res', size=3,
-        bgcolor='silver', colorbar=True, cmap='coolwarm_r', 
+        projection=ANT_proj, color='accum_res', size=10,
+        # bgcolor='silver', 
+        colorbar=True, cmap='coolwarm_r', 
         symmetric=True, tools=['hover'], 
         width=600, height=600, fontsize=1.75)
 
@@ -402,7 +423,7 @@ res2011_perc = 100*(res_2011 / accum_bar)
 
 # %%
 
-plt.rcParams.update({'font.size': 16})
+plt.rcParams.update({'font.size': 24})
 
 def plot_TScomp(
     ts_df1, ts_df2, gdf_combo, labels, 
@@ -501,7 +522,9 @@ def plot_TScomp(
 
         # Add legend and set title based on site name
         axes[i].grid(True)
-        axes[i].legend()
+
+        if i == 0:
+            axes[i].legend()
         # axes[i].set_title('Site '+site+' time series')
 
         if not yaxis:
@@ -913,25 +936,6 @@ tsfig_PAIPR = plot_TScomp(
 # %%[markdown]
 # ## Final figures used in article
 # 
-# %% Data location map
-
-data_map = (
-    elev_plt.opts(colorbar=False)
-    * plt_locCOMB * plt_manPTS 
-    * (plt_accum2011 * plt_accum2016) 
-    * plt_labels.opts(text_font_size='32pt')
-)
-
-data_map = data_map.opts(fontscale=2.5, width=1200, height=1200)
-
-res_map = (
-    elev_plt.opts(colorbar=False) * plt_manPTS* plt_res 
-    * plt_labels.opts(text_font_size='32pt'))
-res_map = res_map.opts(fontscale=2.5, width=1200, height=1200)
-
-elev_bar = elev_plt.opts(
-    colorbar=True, fontscale=2.5, width=1200, height=1200)
-
 # %%
 
 # PAIPR_df = PAIPR_df.query("Site != 'Null'")
@@ -1028,7 +1032,6 @@ for site in np.unique(PAIPR_df.Site):
     print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
 
 print(p_val)
-print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
 
 # %% Paired t tests for manual
 
@@ -1055,7 +1058,6 @@ for site in np.unique(man_df.Site):
     print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
 
 print(p_val)
-print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
 
 # %%
 
@@ -1266,6 +1268,7 @@ def panels_121(
         plot_min (float, optional): Specify a lower bound to the generated plots. Defaults to None.
         plot_max (float, optional): Specifies an upper bound to the generated plots. Defaults to None.
         size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 500.
+        # font_scaler (float, optional): How much to scale the generated plot text. Defaults to no additional scaling.
 
     Returns:
         holoviews.core.layout.Layout: Figure Layout consisting of multiple 1:1 subplots and a subplot with kernel density estimates of the residuals of the various datum.
@@ -1321,7 +1324,13 @@ def panels_121(
 
         # Combine 1:1 line and scatter plot and add to plot list
         one2one_plt = (one2one_line * scatt_yr).opts(
-            width=size, height=size, fontscale=2)
+            width=size, height=size, 
+            fontscale=3,
+            # fontsize={'xticks':30, 'yticks':30}, 
+            xrotation=90, 
+            xticks=4, yticks=4)
+        if i==len(datum)-1:
+            one2one_plt.opts(width=int(size+0.10*size))
         one2one_plts.append(one2one_plt)
 
         # Generate kde for residuals of given estimates and 
@@ -1338,15 +1347,22 @@ def panels_121(
     fig_kde = (
         kde_plots[0] * kde_plots[1] 
         * kde_plots[2] * kde_plots[3]).opts(
-            xaxis=None, yaxis='right', 
-            width=size, height=size, 
-            show_grid=True, fontscale=2)
+            xaxis=None, yaxis=None, 
+            width=size, height=size, show_grid=True, 
+            # fontscale=font_scaler
+        )
     
     # Specific formatting based on subplot position
     if TOP:
-        fig_kde = fig_kde.opts(xaxis='top', xlabel='% Bias')
-    if BOTTOM:
-        fig_kde = fig_kde.opts(xaxis='bottom', xlabel='% Bias')
+        fig_kde = fig_kde.opts(
+            xaxis='top', xlabel='% Bias', xrotation=90, 
+            fontsize={'legend':25, 'xticks':16, 'xlabel':18})
+    elif BOTTOM:
+        fig_kde = fig_kde.opts(
+            xaxis='bottom', xlabel='% Bias', xrotation=90,
+            fontsize={'legend':25, 'xticks':18, 'xlabel':22})
+    else:
+        fig_kde = fig_kde.opts(show_legend=False)
 
 
     # Generate final panel Layout with 1:1 and kde plots
@@ -1375,6 +1391,7 @@ site_list.remove("Null")
 # Iterate through sites
 for i, site in enumerate(site_list):
 
+
     paipr_i = PAIPR_df.query("Site == @site")
     man_i = man_df.query("Site == @site")
     df2011_i = df_2011.query("Site == @site")
@@ -1398,6 +1415,27 @@ fig_supp2 = hv.Layout(
     + figs_supp2[3] + figs_supp2[4] + figs_supp2[5]
     + figs_supp2[6]).cols(5)
 
+# %% Data location map
+
+data_map = (
+    # elev_plt.opts(colorbar=False)
+    hill_plt
+    * cont_plt.opts(colorbar=False)
+    * plt_locCOMB * plt_manPTS 
+    * (plt_accum2011 * plt_accum2016) 
+    * plt_labels.opts(text_font_size='36pt')
+    ).opts(fontscale=2.5, width=1200, height=1200)
+
+res_map = (
+    # elev_plt.opts(colorbar=False) 
+    hill_plt
+    * cont_plt.opts(colorbar=False)
+    * plt_manPTS* plt_res 
+    * plt_labels.opts(text_font_size='36pt')
+    ).opts(
+        ylim=(gdf_bounds['y_range'][0], -2.25E5), 
+        fontscale=2.5, width=1200, height=715)
+
 # %%
 
 tsfig_PAIPR.savefig(
@@ -1415,6 +1453,20 @@ tsfig_2016.savefig(
 
 kde_fig.savefig(fname=ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/kde_fig.svg'))
+
+hv.save(data_map, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/data_map.png'))
+hv.save(res_map, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/res_map.png'))
+hv.save(fig_supp2, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/one2one_plts.png'))
+
+# %%
+
+cont_bar = cont_plt.opts(
+    colorbar=True, fontscale=2.5, width=1200, height=1200)
+hv.save(cont_bar, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/cont_bar.png'))
 
 # %%
 
@@ -1478,15 +1530,6 @@ kde_fig.savefig(fname=ROOT_DIR.joinpath(
 # export_svg(fig_supp2, ROOT_DIR.joinpath(
 #     'docs/Figures/oib-repeat/one2one_plts.svg'))
 # print('done with second plot')
-
-hv.save(data_map, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/data_map.png'))
-hv.save(elev_bar, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/elev_bar.png'))
-hv.save(res_map, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/res_map.png'))
-hv.save(fig_supp2, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/one2one_plts.png'))
 
 
 
