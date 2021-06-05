@@ -1018,7 +1018,7 @@ data_panel = (inset_map + data_map)
 
 # %%
 
-if grid_res==2500:
+if grid_res > 1000:
     hv.save(inset_map, ROOT_DIR.joinpath(
         'docs/Figures/inset.png'))
     hv.save(data_map, ROOT_DIR.joinpath(
@@ -1060,7 +1060,7 @@ BIG_panel = hv.Layout(
 
 # %%
 
-if grid_res==2500:
+if grid_res > 1000:
     hv.save(accum_panel, ROOT_DIR.joinpath(
         'docs/Figures/accum_maps.png'))
     hv.save(trend_panel, ROOT_DIR.joinpath(
@@ -1077,7 +1077,7 @@ trendPERC_panel = coreWIDE_plt.opts(
 
 # %%
 
-if grid_res==2500:
+if grid_res > 1000:
     hv.save(trendPERC_panel, ROOT_DIR.joinpath(
         'docs/Figures/trendPERC_maps.png'))    
     BigTS_fig.savefig(fname=ROOT_DIR.joinpath(
