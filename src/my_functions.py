@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 import shutil
 import os
-# import rasterio as rio
+import rasterio as rio
 from sklearn.neighbors import BallTree
 from scipy import signal
 import statsmodels.tsa.stattools as tsa
@@ -489,10 +489,10 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
 
     trend_mu = np.nanmean(trends_bs, axis=0)
     intercept_mu = np.nanmean(intercepts, axis=0)
-    trend_05 = np.nanpercentile(trends_bs, 2.5, axis=0)
-    trend_95 = np.nanpercentile(trends_bs, 97.5, axis=0)
+    trendCI_lb = np.nanpercentile(trends_bs, 2.5, axis=0)
+    trendCI_ub = np.nanpercentile(trends_bs, 97.5, axis=0)
 
-    return trend_mu, intercept_mu, trend_05, trend_95
+    return trend_mu, intercept_mu, trendCI_lb, trendCI_ub
 
 # Function to perform autocorrelation
 def acf(df):
@@ -513,94 +513,144 @@ def acf(df):
 
     return acf_df
 
-# import requests
-# def get_REMA(tile_idx, output_dir):
-#     """
-#     Downloads, unzips, and saves DEM tiles from the Reference Elevation Model of Antarctica (REMA) dataset.
-#     Required inputs:
-#     tile_idx {pandas.core.frame.DataFrame}: Dataframe with the names (name), tile IDs (tile), and file urls (fileurl) of the requested data for download, taken from the [REMA tile shapefile](http://data.pgc.umn.edu/elev/dem/setsm/REMA/indexes/).
-#     output_dir {pathlib.PosixPath}: Path of directory at which to download the requested file.
-#     """
+import requests
+def get_REMA(tile_idx, output_dir):
+    """
+    Downloads, unzips, and saves DEM tiles from the Reference Elevation Model of Antarctica (REMA) dataset.
+    Required inputs:
+    tile_idx {pandas.core.frame.DataFrame}: Dataframe with the names (name), tile IDs (tile), and file urls (fileurl) of the requested data for download, taken from the [REMA tile shapefile](http://data.pgc.umn.edu/elev/dem/setsm/REMA/indexes/).
+    output_dir {pathlib.PosixPath}: Path of directory at which to download the requested file.
+    """
 
-#     for idx, row in tile_idx.iterrows():
-#         f_dir = output_dir.joinpath(row.tile)
+    for idx, row in tile_idx.iterrows():
+        f_dir = output_dir.joinpath(row.tile)
 
-#         if not f_dir.exists():
-#             f_dir.mkdir(parents=True)
-#             zip_path = f_dir.joinpath('tmp.tar.gz')
-#             r = requests.get(row.fileurl, stream=True)
-#             print(f"Downloading tile {f_dir.name}")
-#             with open(zip_path, 'wb') as zFile:
-#                 for chunk in r.iter_content(
-#                         chunk_size=1024*1024):
-#                     if chunk:
-#                         zFile.write(chunk)
-#             print(f"Unzipping tile {f_dir.name}")
-#             shutil.unpack_archive(zip_path, f_dir)
-#             os.remove(zip_path)
-#         else:
-#             print(f"REMA tile {f_dir.name} already exists locally, moving to next download")
-#     print("All requested files downloaded")
+        if not f_dir.exists():
+            f_dir.mkdir(parents=True)
+            zip_path = f_dir.joinpath('tmp.tar.gz')
+            r = requests.get(row.fileurl, stream=True)
+            print(f"Downloading tile {f_dir.name}")
+            with open(zip_path, 'wb') as zFile:
+                for chunk in r.iter_content(
+                        chunk_size=1024*1024):
+                    if chunk:
+                        zFile.write(chunk)
+            print(f"Unzipping tile {f_dir.name}")
+            shutil.unpack_archive(zip_path, f_dir)
+            os.remove(zip_path)
+        else:
+            print(f"REMA tile {f_dir.name} already exists locally, moving to next download")
+    print("All requested files downloaded")
     
-# def topo_vals(tile_dir, locations):
-#     """
-#     Extracts elevation, slope, and aspect values at given locations.
+def topo_vals(tile_dir, locations):
+    """
+    Extracts elevation, slope, and aspect values at given locations.
     
-#     Parameters:
-#     tile_dir {pathlib.PosixPath}: The relative or absolute path to a directory containing REMA tile DSM, slope and aspect geotiffs.
-#     trace_locs {geopandas.geodataframe.GeoDataFrame}: A geodataframe containing the locations at which to extract raster data. These data should have the same coordinate reference system as the raster data, with the geometries stored in a column named "geometry".
+    Parameters:
+    tile_dir {pathlib.PosixPath}: The relative or absolute path to a directory containing REMA tile DSM, slope and aspect geotiffs.
+    trace_locs {geopandas.geodataframe.GeoDataFrame}: A geodataframe containing the locations at which to extract raster data. These data should have the same coordinate reference system as the raster data, with the geometries stored in a column named "geometry".
 
-#     Dependencies: Requires the rasterio (as rio) module and, by extension, GDAL binaries.
-#     Requires the geopandas module.
-#     """
-#     # Preallocate elevation variable in geodf
-#     if 'Elev' not in locations.columns:
-#         locations['Elev'] = None
-#     # locations = (
-#     #     locations.assign(elev=None)
-#     #     .assign(slope=None).assign(aspect=None))
+    Dependencies: Requires the rasterio (as rio) module and, by extension, GDAL binaries.
+    Requires the geopandas module.
+    """
+    # Preallocate elevation variable in geodf
+    if 'Elev' not in locations.columns:
+        locations['Elev'] = None
+    # locations = (
+    #     locations.assign(elev=None)
+    #     .assign(slope=None).assign(aspect=None))
 
-#     # Ensure locations are in same crs as REMA (EPSG:3031)
-#     locations.to_crs(epsg=3031, inplace=True)
+    # Ensure locations are in same crs as REMA (EPSG:3031)
+    locations.to_crs(epsg=3031, inplace=True)
 
-#     # Extract coordinates of sample points
-#     coords = (
-#         [(x,y) for x, y in zip(
-#             locations.geometry.x, locations.geometry.y)]
-#     )
+    # Extract coordinates of sample points
+    coords = (
+        [(x,y) for x, y in zip(
+            locations.geometry.x, locations.geometry.y)]
+    )
     
-#     # Extract elevation values for all points within tile
-#     tile_path = [
-#         file for file in tile_dir.glob("*dem.tif")][0]
-#     src = rio.open(tile_path)
-#     tile_vals = np.asarray(
-#         [x[0] for x in src.sample(coords, masked=True)])
-#     tile_mask = ~np.isnan(tile_vals)
-#     locations.Elev[tile_mask] = tile_vals[tile_mask]
-#     src.close()
+    # Extract elevation values for all points within tile
+    tile_path = [
+        file for file in tile_dir.glob("*dem.tif")][0]
+    src = rio.open(tile_path)
+    tile_vals = np.asarray(
+        [x[0] for x in src.sample(coords, masked=True)])
+    tile_mask = ~np.isnan(tile_vals)
+    locations.Elev[tile_mask] = tile_vals[tile_mask]
+    src.close()
 
-#     # # Extract slope values for all points within tile
-#     # tile_path = [
-#     #     file for file in tile_dir.glob("*slope.tif")][0]
-#     # src = rio.open(tile_path)
-#     # tile_vals = np.asarray(
-#     #     [x[0] for x in src.sample(coords, masked=True)])
-#     # tile_mask = ~np.isnan(tile_vals)
-#     # trace_locs.slope[tile_mask] = tile_vals[tile_mask]
-#     # src.close()
+    # # Extract slope values for all points within tile
+    # tile_path = [
+    #     file for file in tile_dir.glob("*slope.tif")][0]
+    # src = rio.open(tile_path)
+    # tile_vals = np.asarray(
+    #     [x[0] for x in src.sample(coords, masked=True)])
+    # tile_mask = ~np.isnan(tile_vals)
+    # trace_locs.slope[tile_mask] = tile_vals[tile_mask]
+    # src.close()
 
-#     # # Extract aspect values for all points within tile
-#     # tile_path = [
-#     #     file for file in tile_dir.glob("*aspect.tif")][0]
-#     # src = rio.open(tile_path)
-#     # tile_vals = np.asarray(
-#     #     [x[0] for x in src.sample(coords, masked=True)])
-#     # tile_mask = ~np.isnan(tile_vals)
-#     # trace_locs.aspect[tile_mask] = tile_vals[tile_mask]
-#     # src.close()
+    # # Extract aspect values for all points within tile
+    # tile_path = [
+    #     file for file in tile_dir.glob("*aspect.tif")][0]
+    # src = rio.open(tile_path)
+    # tile_vals = np.asarray(
+    #     [x[0] for x in src.sample(coords, masked=True)])
+    # tile_mask = ~np.isnan(tile_vals)
+    # trace_locs.aspect[tile_mask] = tile_vals[tile_mask]
+    # src.close()
 
-#     return locations
+    return locations
 
 
+
+def extract_at_pts(
+    xr_ds, gdf_pts, coord_names=['lon','lat'], 
+    return_dist=False, planet_radius=6371000):
+    """
+    Function where, given an xr-dataset and a Point-based geodataframe, 
+    extract all values of variables in xr-dataset at pixels nearest 
+    the given points in the geodataframe.
+    xr_ds {xarray.core.dataset.Dataset}: Xarray dataset containing variables to extract.
+    gdf_pts {geopandas.geodataframe.GeoDataFrame} : A Points-based geodataframe containing the locations at which to extract xrarray variables.
+    coord_names {list}: The names of the longitude and latitude coordinates within xr_ds.
+    return_dist {bool}: Whether function to append the distance (in meters) between the given queried points and the nearest raster pixel centroids. 
+    NOTE: This assumes the xr-dataset includes lon/lat in the coordinates 
+    (although they can be named anything, as this can be prescribed in the `coord_names` variable).
+    """
+    # Convert xr dataset to df and extract coordinates
+    xr_df = xr_ds.to_dataframe().reset_index()
+    xr_coord = xr_df[coord_names]
+
+    # Ensure gdf_pts is in lon/lat and extract coordinates
+    crs_end = gdf_pts.crs 
+    gdf_pts.to_crs(epsg=4326, inplace=True)
+    pt_coord = pd.DataFrame(
+        {'Lon': gdf_pts.geometry.x, 
+        'Lat': gdf_pts.geometry.y}).reset_index(drop=True)
+
+    # Convert lon/lat points to RADIANS for both datasets
+    xr_coord = xr_coord*np.pi/180
+    pt_coord = pt_coord*np.pi/180
+
+    # Find xr data nearest given points
+    xr_idx, xr_dist = get_nearest(pt_coord, xr_coord)
+
+    # Drop coordinate data from xr (leaves raster values)
+    cols_drop = list(dict(xr_ds.coords).keys())
+    xr_df_filt = xr_df.iloc[xr_idx].drop(
+        cols_drop, axis=1).reset_index(drop=True)
+    
+    # Add raster values to geodf
+    gdf_return = gdf_pts.reset_index(
+        drop=True).join(xr_df_filt)
+    
+    # Add distance between raster center and points to gdf
+    if return_dist:
+        gdf_return['dist_m'] = xr_dist * planet_radius
+    
+    # Reproject results back to original projection
+    gdf_return.to_crs(crs_end, inplace=True)
+
+    return gdf_return
 
     

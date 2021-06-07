@@ -191,3 +191,6 @@ data/*
 
 # Ignore the docs/Figures/ directory contents
 docs/Figures/*
+
+# Ignore the docs/submission-docs directory
+docs/submission-docs/*
