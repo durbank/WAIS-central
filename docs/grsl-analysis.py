@@ -341,8 +341,9 @@ def semi_vario(
     else:
         gamma_df = gamma_vals
 
-    # Add distance and count values to output
+    # Add distance, lag center, and count values to output
     gamma_df['dist'] = df_groups['dist'].mean()
+    gamma_df['lag_cent'] = lags[1::]-lag_size//2
     gamma_df['cnt'] = df_groups['dist'].count()
 
     return gamma_df
@@ -350,7 +351,7 @@ def semi_vario(
 # %%
 
 gamma_df = semi_vario(
-    gdf_PAIPR, lag_size=100, vars=['accum_mu', 'accum_res'], 
+    gdf_PAIPR, lag_size=250, vars=['accum_mu', 'accum_res'], 
     scale=True)
 
 
@@ -367,36 +368,36 @@ gdf_noise['accum_res'] = np.random.normal(
     size=gdf_noise.shape[0])
 
 gamma_noise = semi_vario(
-    gdf_noise, lag_size=100, vars=['accum_mu', 'accum_res'], 
+    gdf_noise, lag_size=250, vars=['accum_mu', 'accum_res'], 
     scale=True)
 
 # %% Plots/exploration of semivariograms
 
-threshold = 50
-data1 = gamma_df.query('cnt > @threshold')
-data2 = gamma_noise.query('cnt > @threshold')
+# According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
+threshold = gamma_df['dist'].max()/2
+data1 = gamma_df.query('dist <= @threshold')
+data2 = gamma_noise.query('dist <= @threshold')
 
 fig1, ax1 = plt.subplots()
 
 data1.plot(
     kind='scatter', ax=ax1, color='blue', 
-    x='dist', y='accum_mu', label='Real data')
+    x='lag_cent', y='accum_mu', label='Real data')
 data2.plot(
     kind='scatter', ax=ax1, color='red', 
-    x='dist', y='accum_mu', label='Noise')
+    x='lag_cent', y='accum_mu', label='Noise')
 plt.title('Mean accumulation variogram')
 
 fig2, ax2 = plt.subplots()
 
 data1.plot(
     kind='scatter', ax=ax2, color='blue', 
-    x='dist', y='accum_res', label='Real data')
+    x='lag_cent', y='accum_res', label='Real data')
 data2.plot(
     kind='scatter', ax=ax2, color='red', 
-    x='dist', y='accum_res', label='Noise')
+    x='lag_cent', y='accum_res', label='Noise')
 plt.title('Accumulation residual variogram')
 
-# %%
 
 # %%
 
