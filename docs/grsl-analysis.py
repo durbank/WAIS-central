@@ -20,6 +20,7 @@ import panel as pn
 import seaborn as sns
 import xarray as xr
 from xrspatial import hillshade
+from scipy.spatial.distance import pdist
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -271,6 +272,131 @@ plt_res = gv.Points(
 
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
 # plt_res
+
+
+
+
+# %% Spatial coherence and variability
+
+def semi_vario(
+    points_gdf, lag_size, d_metric='euclidean', 
+    vars='all', scale=True):
+    """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
+
+    Args:
+        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
+        lag_size (int): The size of the lagging interval to use for binning semivariance values.
+        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
+        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
+        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
+
+    Returns:
+        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
+    """
+
+    # Get column names if 'all' is selected for "vars"
+    if vars == "all":
+        vars = points_gdf.drop(
+            columns='geometry').columns
+
+    # Extact trace coordinates and calculate pairwise distance
+    locs_arr = np.array(
+        [points_gdf.geometry.x, points_gdf.geometry.y]).T
+    dist_arr = pdist(locs_arr, metric=d_metric)
+
+    # Calculate the indices used for each pairwise calculation
+    i_idx = np.empty(dist_arr.shape)
+    j_idx = np.empty(dist_arr.shape)
+    m = locs_arr.shape[0]
+    for i in range(m):
+        for j in range(m):
+            if i < j < m:
+                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
+                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
+
+    # Create dfs for paired-point values
+    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
+        drop=True)
+    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
+        drop=True)
+
+    # Calculate squared difference bewteen variable values
+    sqdiff_df = (i_vals - j_vals)**2
+    sqdiff_df['dist'] = dist_arr
+
+    # Create array of lag interval endpoints
+    d_max = lag_size * (dist_arr.max() // lag_size + 1)
+    lags = np.arange(0,d_max+1,lag_size)
+
+    # Group variables based on lagged distance intervals
+    df_groups = sqdiff_df.groupby(
+        pd.cut(sqdiff_df['dist'], lags))
+
+    # Calculate semivariance at each lag for each variable
+    gamma_vals = (1/2)*df_groups[vars].mean()
+    gamma_vals.index.name = 'lag'
+
+    if scale:
+        gamma_df = gamma_vals / gamma_vals.max()
+    else:
+        gamma_df = gamma_vals
+
+    # Add distance and count values to output
+    gamma_df['dist'] = df_groups['dist'].mean()
+    gamma_df['cnt'] = df_groups['dist'].count()
+
+    return gamma_df
+
+# %%
+
+gamma_df = semi_vario(
+    gdf_PAIPR, lag_size=100, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+
+
+gdf_noise = gdf_PAIPR.copy()[
+    ['geometry', 'accum_mu', 'accum_res']]
+gdf_noise['accum_mu'] = np.random.normal(
+    loc=gdf_noise['accum_mu'].mean(), 
+    scale=gdf_noise['accum_mu'].std(), 
+    size=gdf_noise.shape[0])
+gdf_noise['accum_res'] = np.random.normal(
+    loc=gdf_noise['accum_res'].mean(), 
+    scale=gdf_noise['accum_res'].std(), 
+    size=gdf_noise.shape[0])
+
+gamma_noise = semi_vario(
+    gdf_noise, lag_size=100, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# %% Plots/exploration of semivariograms
+
+threshold = 50
+data1 = gamma_df.query('cnt > @threshold')
+data2 = gamma_noise.query('cnt > @threshold')
+
+fig1, ax1 = plt.subplots()
+
+data1.plot(
+    kind='scatter', ax=ax1, color='blue', 
+    x='dist', y='accum_mu', label='Real data')
+data2.plot(
+    kind='scatter', ax=ax1, color='red', 
+    x='dist', y='accum_mu', label='Noise')
+plt.title('Mean accumulation variogram')
+
+fig2, ax2 = plt.subplots()
+
+data1.plot(
+    kind='scatter', ax=ax2, color='blue', 
+    x='dist', y='accum_res', label='Real data')
+data2.plot(
+    kind='scatter', ax=ax2, color='red', 
+    x='dist', y='accum_res', label='Noise')
+plt.title('Accumulation residual variogram')
+
+# %%
 
 # %%
 
