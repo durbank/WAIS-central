@@ -12,6 +12,7 @@ import rasterio as rio
 from sklearn.neighbors import BallTree
 from scipy import signal
 import statsmodels.tsa.stattools as tsa
+import richdem as rd
 
 # Function to import and concatenate PAIPR .csv files
 def import_PAIPR(input_dir):
@@ -541,7 +542,53 @@ def get_REMA(tile_idx, output_dir):
         else:
             print(f"REMA tile {f_dir.name} already exists locally, moving to next download")
     print("All requested files downloaded")
+
+
+def calc_topo(dem_path):
+    """
+    Calculates slope and aspect from given DEM and saves output.
+    The function checks to see whether a slope/aspect file has already been created so as to avoid needless processing.
     
+    Parameters:
+    dem_path (pathlib.PosixPath): The relative or absolute path to an input DEM file.
+
+    Dependencies: 
+    richdem module
+    GDAL binaries
+    pathlib module
+    """
+    slope_path = Path(
+        str(dem_path).replace("dem", "slope"))
+    aspect_path = Path(
+        str(dem_path).replace("dem", "aspect"))
+
+    if ((not slope_path.is_file()) or 
+            (not aspect_path.is_file())):
+        
+        # Load DEM
+        dem = rd.LoadGDAL(str(dem_path))
+        
+        # Calculate slope values from DEM
+        if not slope_path.is_file():
+            print(f"Calculating slope values for REMA tile {dem_path.parent.name}...")
+            slope = rd.TerrainAttribute(
+                dem, attrib='slope_riserun')
+            rd.SaveGDAL(str(slope_path), slope)
+        else:
+                print(f"Slope data already exist locally for REMA tile {dem_path.parent.name}. Checking for aspect data...")
+        
+        # Calculate aspect values from DEM
+        if not aspect_path.is_file():
+            print(f"Calculating aspect values for REMA tile {dem_path.parent.name}...")
+            aspect = rd.TerrainAttribute(dem, attrib='aspect')
+            rd.SaveGDAL(str(aspect_path), aspect)
+        else:
+            print(f"Aspect data already exist locally for REMA tile {dem_path.parent.name}. Moving to next tile...")
+
+    else:
+        print(f"Slope/aspect geotifs already exist locally for REMA tile {dem_path.parent.name}. Moving to next tile...")
+
+
 def topo_vals(tile_dir, locations, slope=False, aspect=False):
     """Extracts elevation, slope, and aspect values at given locations.
     Dependencies: Requires the rasterio (as rio) module and, by extension, GDAL binaries.
@@ -557,12 +604,11 @@ def topo_vals(tile_dir, locations, slope=False, aspect=False):
         geopandas.geodataframe.GeoDataFrame: The same input geodataframe with topographic values appended.
     """
 
-    # Preallocate elevation variable in geodf
-    if 'Elev' not in locations.columns:
-        locations['Elev'] = None
-    # locations = (
-    #     locations.assign(elev=None)
-    #     .assign(slope=None).assign(aspect=None))
+    # Create empty Elev column if missing in gdf
+    if 'elev' not in locations.columns:
+        elev = np.empty(locations.shape[0])
+        elev[:] = np.NaN
+        locations['elev'] = elev
 
     # Get initial gdf crs
     crs_init = locations.crs
@@ -575,7 +621,7 @@ def topo_vals(tile_dir, locations, slope=False, aspect=False):
         [(x,y) for x, y in zip(
             locations.geometry.x, locations.geometry.y)]
     )
-    
+
     # Extract elevation values for all points within tile
     tile_path = [
         file for file in tile_dir.glob("*dem.tif")][0]
@@ -583,10 +629,19 @@ def topo_vals(tile_dir, locations, slope=False, aspect=False):
     tile_vals = np.asarray(
         [x[0] for x in src.sample(coords, masked=True)])
     tile_mask = ~np.isnan(tile_vals)
-    locations.Elev[tile_mask] = tile_vals[tile_mask]
+    locations.loc[tile_mask,'elev'] = tile_vals[tile_mask]
     src.close()
 
+    # Force elevation data to numeric
+    #
+
     if slope:
+        # Create empty slope column if missing in gdf
+        if 'slope' not in locations.columns:
+            slope = np.empty(locations.shape[0])
+            slope[:] = np.NaN
+            locations['slope'] = slope
+
         # Extract slope values for all points within tile
         tile_path = [
             file for file in tile_dir.glob("*slope.tif")][0]
@@ -594,10 +649,16 @@ def topo_vals(tile_dir, locations, slope=False, aspect=False):
         tile_vals = np.asarray(
             [x[0] for x in src.sample(coords, masked=True)])
         tile_mask = ~np.isnan(tile_vals)
-        locations.slope[tile_mask] = tile_vals[tile_mask]
+        locations.loc[tile_mask,'slope'] = tile_vals[tile_mask]
         src.close()
 
     if aspect:
+        # Create empty aspect column if missing in gdf
+        if 'aspect' not in locations.columns:
+            aspect = np.empty(locations.shape[0])
+            aspect[:] = np.NaN
+            locations['aspect'] = aspect
+
         # Extract aspect values for all points within tile
         tile_path = [
             file for file in tile_dir.glob("*aspect.tif")][0]
@@ -605,7 +666,7 @@ def topo_vals(tile_dir, locations, slope=False, aspect=False):
         tile_vals = np.asarray(
             [x[0] for x in src.sample(coords, masked=True)])
         tile_mask = ~np.isnan(tile_vals)
-        locations.aspect[tile_mask] = tile_vals[tile_mask]
+        locations.loc[tile_mask,'aspect'] = tile_vals[tile_mask]
         src.close()
 
     # Convert gdf crs back to original
