@@ -273,132 +273,6 @@ plt_res = gv.Points(
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
 # plt_res
 
-
-
-
-# %% Spatial coherence and variability
-
-def semi_vario(
-    points_gdf, lag_size, d_metric='euclidean', 
-    vars='all', scale=True):
-    """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
-
-    Args:
-        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
-        lag_size (int): The size of the lagging interval to use for binning semivariance values.
-        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
-        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
-        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
-
-    Returns:
-        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
-    """
-
-    # Get column names if 'all' is selected for "vars"
-    if vars == "all":
-        vars = points_gdf.drop(
-            columns='geometry').columns
-
-    # Extact trace coordinates and calculate pairwise distance
-    locs_arr = np.array(
-        [points_gdf.geometry.x, points_gdf.geometry.y]).T
-    dist_arr = pdist(locs_arr, metric=d_metric)
-
-    # Calculate the indices used for each pairwise calculation
-    i_idx = np.empty(dist_arr.shape)
-    j_idx = np.empty(dist_arr.shape)
-    m = locs_arr.shape[0]
-    for i in range(m):
-        for j in range(m):
-            if i < j < m:
-                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
-                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
-
-    # Create dfs for paired-point values
-    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
-        drop=True)
-    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
-        drop=True)
-
-    # Calculate squared difference bewteen variable values
-    sqdiff_df = (i_vals - j_vals)**2
-    sqdiff_df['dist'] = dist_arr
-
-    # Create array of lag interval endpoints
-    d_max = lag_size * (dist_arr.max() // lag_size + 1)
-    lags = np.arange(0,d_max+1,lag_size)
-
-    # Group variables based on lagged distance intervals
-    df_groups = sqdiff_df.groupby(
-        pd.cut(sqdiff_df['dist'], lags))
-
-    # Calculate semivariance at each lag for each variable
-    gamma_vals = (1/2)*df_groups[vars].mean()
-    gamma_vals.index.name = 'lag'
-
-    if scale:
-        gamma_df = gamma_vals / gamma_vals.max()
-    else:
-        gamma_df = gamma_vals
-
-    # Add distance, lag center, and count values to output
-    gamma_df['dist'] = df_groups['dist'].mean()
-    gamma_df['lag_cent'] = lags[1::]-lag_size//2
-    gamma_df['cnt'] = df_groups['dist'].count()
-
-    return gamma_df
-
-# %%
-
-gamma_df = semi_vario(
-    gdf_PAIPR, lag_size=250, vars=['accum_mu', 'accum_res'], 
-    scale=True)
-
-
-
-gdf_noise = gdf_PAIPR.copy()[
-    ['geometry', 'accum_mu', 'accum_res']]
-gdf_noise['accum_mu'] = np.random.normal(
-    loc=gdf_noise['accum_mu'].mean(), 
-    scale=gdf_noise['accum_mu'].std(), 
-    size=gdf_noise.shape[0])
-gdf_noise['accum_res'] = np.random.normal(
-    loc=gdf_noise['accum_res'].mean(), 
-    scale=gdf_noise['accum_res'].std(), 
-    size=gdf_noise.shape[0])
-
-gamma_noise = semi_vario(
-    gdf_noise, lag_size=250, vars=['accum_mu', 'accum_res'], 
-    scale=True)
-
-# %% Plots/exploration of semivariograms
-
-# According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
-threshold = gamma_df['dist'].max()/2
-data1 = gamma_df.query('dist <= @threshold')
-data2 = gamma_noise.query('dist <= @threshold')
-
-fig1, ax1 = plt.subplots()
-
-data1.plot(
-    kind='scatter', ax=ax1, color='blue', 
-    x='lag_cent', y='accum_mu', label='Real data')
-data2.plot(
-    kind='scatter', ax=ax1, color='red', 
-    x='lag_cent', y='accum_mu', label='Noise')
-plt.title('Mean accumulation variogram')
-
-fig2, ax2 = plt.subplots()
-
-data1.plot(
-    kind='scatter', ax=ax2, color='blue', 
-    x='lag_cent', y='accum_res', label='Real data')
-data2.plot(
-    kind='scatter', ax=ax2, color='red', 
-    x='lag_cent', y='accum_res', label='Noise')
-plt.title('Accumulation residual variogram')
-
-
 # %%
 
 # Generate indices corresponding to desired sites
@@ -474,6 +348,132 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
 
 paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 # paipr_1to1_plt_comb
+
+# %%[markdown]
+# ## Investigations of spatial variability
+#  
+# %% Spatial coherence and variability
+
+def vario(
+    points_gdf, lag_size, d_metric='euclidean', 
+    vars='all', scale=True):
+    """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
+
+    Args:
+        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
+        lag_size (int): The size of the lagging interval to use for binning semivariance values.
+        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
+        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
+        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
+
+    Returns:
+        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
+    """
+
+    # Get column names if 'all' is selected for "vars"
+    if vars == "all":
+        vars = points_gdf.drop(
+            columns='geometry').columns
+
+    # Extact trace coordinates and calculate pairwise distance
+    locs_arr = np.array(
+        [points_gdf.geometry.x, points_gdf.geometry.y]).T
+    dist_arr = pdist(locs_arr, metric=d_metric)
+
+    # Calculate the indices used for each pairwise calculation
+    i_idx = np.empty(dist_arr.shape)
+    j_idx = np.empty(dist_arr.shape)
+    m = locs_arr.shape[0]
+    for i in range(m):
+        for j in range(m):
+            if i < j < m:
+                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
+                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
+
+    # Create dfs for paired-point values
+    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
+        drop=True)
+    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
+        drop=True)
+
+    # Calculate squared difference bewteen variable values
+    sqdiff_df = (i_vals - j_vals)**2
+    sqdiff_df['dist'] = dist_arr
+
+    # Create array of lag interval endpoints
+    d_max = lag_size * (dist_arr.max() // lag_size + 1)
+    lags = np.arange(0,d_max+1,lag_size)
+
+    # Group variables based on lagged distance intervals
+    df_groups = sqdiff_df.groupby(
+        pd.cut(sqdiff_df['dist'], lags))
+
+    # Calculate semivariance at each lag for each variable
+    gamma_vals = (1/2)*df_groups[vars].mean()
+    gamma_vals.index.name = 'lag'
+
+    if scale:
+        gamma_df = gamma_vals / gamma_vals.max()
+    else:
+        gamma_df = gamma_vals
+
+    # Add distance, lag center, and count values to output
+    gamma_df['dist'] = df_groups['dist'].mean()
+    gamma_df['lag_cent'] = lags[1::]-lag_size//2
+    gamma_df['cnt'] = df_groups['dist'].count()
+
+    return gamma_df
+
+# %%
+
+# Calculate variogram for PAIPR results
+gamma_df = vario(
+    gdf_PAIPR, lag_size=250, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# Generate random noise with matched characteristics to PAIPR results
+gdf_noise = gdf_PAIPR.copy()[
+    ['geometry', 'accum_mu', 'accum_res']]
+gdf_noise['accum_mu'] = np.random.normal(
+    loc=gdf_noise['accum_mu'].mean(), 
+    scale=gdf_noise['accum_mu'].std(), 
+    size=gdf_noise.shape[0])
+gdf_noise['accum_res'] = np.random.normal(
+    loc=gdf_noise['accum_res'].mean(), 
+    scale=gdf_noise['accum_res'].std(), 
+    size=gdf_noise.shape[0])
+
+# Calculate variogram for random noise results
+gamma_noise = vario(
+    gdf_noise, lag_size=250, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# %% Plots/exploration of semivariograms
+
+# According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
+threshold = gamma_df['dist'].max()/2
+data1 = gamma_df.query('dist <= @threshold')
+data2 = gamma_noise.query('dist <= @threshold')
+
+# Plot of mean accum variograms between PAIPR and noise
+fig1, ax1 = plt.subplots()
+data1.plot(
+    kind='scatter', ax=ax1, color='blue', 
+    x='lag_cent', y='accum_mu', label='Real data')
+data2.plot(
+    kind='scatter', ax=ax1, color='red', 
+    x='lag_cent', y='accum_mu', label='Noise')
+plt.title('Mean accumulation variogram')
+
+# Plot of accum residuals variograms between PAIPR and noise
+fig2, ax2 = plt.subplots()
+data1.plot(
+    kind='scatter', ax=ax2, color='blue', 
+    x='lag_cent', y='accum_res', label='Real data')
+data2.plot(
+    kind='scatter', ax=ax2, color='red', 
+    x='lag_cent', y='accum_res', label='Noise')
+plt.title('Accumulation residual variogram')
 
 # %%[markdown]
 # ## 2011 PAIPR-manual comparions
