@@ -542,23 +542,30 @@ def get_REMA(tile_idx, output_dir):
             print(f"REMA tile {f_dir.name} already exists locally, moving to next download")
     print("All requested files downloaded")
     
-def topo_vals(tile_dir, locations):
-    """
-    Extracts elevation, slope, and aspect values at given locations.
-    
-    Parameters:
-    tile_dir {pathlib.PosixPath}: The relative or absolute path to a directory containing REMA tile DSM, slope and aspect geotiffs.
-    trace_locs {geopandas.geodataframe.GeoDataFrame}: A geodataframe containing the locations at which to extract raster data. These data should have the same coordinate reference system as the raster data, with the geometries stored in a column named "geometry".
-
+def topo_vals(tile_dir, locations, slope=False, aspect=False):
+    """Extracts elevation, slope, and aspect values at given locations.
     Dependencies: Requires the rasterio (as rio) module and, by extension, GDAL binaries.
     Requires the geopandas module.
+
+    Args:
+        tile_dir (pathlib.PosixPath): The relative or absolute path to a directory containing REMA tile DSM, slope and aspect geotiffs.
+        locations (geopandas.geodataframe.GeoDataFrame): A geodataframe containing the locations at which to extract raster data. These data should have the geometries stored in a column named "geometry" (the default for geopandas).
+        slope (bool, optional): Whether to also extract slope values at points of interest. Defaults to False.
+        aspect (bool, optional): Whether to also extract aspect values at points of interest. Defaults to False.
+
+    Returns:
+        geopandas.geodataframe.GeoDataFrame: The same input geodataframe with topographic values appended.
     """
+
     # Preallocate elevation variable in geodf
     if 'Elev' not in locations.columns:
         locations['Elev'] = None
     # locations = (
     #     locations.assign(elev=None)
     #     .assign(slope=None).assign(aspect=None))
+
+    # Get initial gdf crs
+    crs_init = locations.crs
 
     # Ensure locations are in same crs as REMA (EPSG:3031)
     locations.to_crs(epsg=3031, inplace=True)
@@ -579,25 +586,30 @@ def topo_vals(tile_dir, locations):
     locations.Elev[tile_mask] = tile_vals[tile_mask]
     src.close()
 
-    # # Extract slope values for all points within tile
-    # tile_path = [
-    #     file for file in tile_dir.glob("*slope.tif")][0]
-    # src = rio.open(tile_path)
-    # tile_vals = np.asarray(
-    #     [x[0] for x in src.sample(coords, masked=True)])
-    # tile_mask = ~np.isnan(tile_vals)
-    # trace_locs.slope[tile_mask] = tile_vals[tile_mask]
-    # src.close()
+    if slope:
+        # Extract slope values for all points within tile
+        tile_path = [
+            file for file in tile_dir.glob("*slope.tif")][0]
+        src = rio.open(tile_path)
+        tile_vals = np.asarray(
+            [x[0] for x in src.sample(coords, masked=True)])
+        tile_mask = ~np.isnan(tile_vals)
+        locations.slope[tile_mask] = tile_vals[tile_mask]
+        src.close()
 
-    # # Extract aspect values for all points within tile
-    # tile_path = [
-    #     file for file in tile_dir.glob("*aspect.tif")][0]
-    # src = rio.open(tile_path)
-    # tile_vals = np.asarray(
-    #     [x[0] for x in src.sample(coords, masked=True)])
-    # tile_mask = ~np.isnan(tile_vals)
-    # trace_locs.aspect[tile_mask] = tile_vals[tile_mask]
-    # src.close()
+    if aspect:
+        # Extract aspect values for all points within tile
+        tile_path = [
+            file for file in tile_dir.glob("*aspect.tif")][0]
+        src = rio.open(tile_path)
+        tile_vals = np.asarray(
+            [x[0] for x in src.sample(coords, masked=True)])
+        tile_mask = ~np.isnan(tile_vals)
+        locations.aspect[tile_mask] = tile_vals[tile_mask]
+        src.close()
+
+    # Convert gdf crs back to original
+    locations.to_crs(crs_init, inplace=True)
 
     return locations
 
@@ -607,9 +619,7 @@ def extract_at_pts(
     xr_ds, gdf_pts, coord_names=['lon','lat'], 
     return_dist=False, planet_radius=6371000):
     """
-    Function where, given an xr-dataset and a Point-based geodataframe, 
-    extract all values of variables in xr-dataset at pixels nearest 
-    the given points in the geodataframe.
+    Function where, given an xr-dataset and a Point-based geodataframe, extract all values of variables in xr-dataset at pixels nearest the given points in the geodataframe.
     xr_ds {xarray.core.dataset.Dataset}: Xarray dataset containing variables to extract.
     gdf_pts {geopandas.geodataframe.GeoDataFrame} : A Points-based geodataframe containing the locations at which to extract xrarray variables.
     coord_names {list}: The names of the longitude and latitude coordinates within xr_ds.
@@ -617,6 +627,7 @@ def extract_at_pts(
     NOTE: This assumes the xr-dataset includes lon/lat in the coordinates 
     (although they can be named anything, as this can be prescribed in the `coord_names` variable).
     """
+
     # Convert xr dataset to df and extract coordinates
     xr_df = xr_ds.to_dataframe().reset_index()
     xr_coord = xr_df[coord_names]
