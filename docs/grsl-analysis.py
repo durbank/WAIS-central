@@ -26,7 +26,7 @@ from scipy.spatial.distance import pdist
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
 
 # Set project root directory
-ROOT_DIR = ROOT_DIR = Path(__file__).parents[1]
+ROOT_DIR = Path(__file__).parents[1]
 
 # Import custom project functions
 import sys
@@ -355,8 +355,9 @@ paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 # %% Spatial coherence and variability
 
 def vario(
-    points_gdf, lag_size, d_metric='euclidean', 
-    vars='all', scale=True):
+    points_gdf, lag_size, 
+    d_metric='euclidean', vars='all', 
+    stationarize=False, scale=True):
     """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
 
     Args:
@@ -390,6 +391,10 @@ def vario(
                 i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
                 j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
 
+
+    if stationarize:
+        pass
+    
     # Create dfs for paired-point values
     i_vals = points_gdf[vars].iloc[i_idx].reset_index(
         drop=True)
@@ -428,7 +433,7 @@ def vario(
 
 # Calculate variogram for PAIPR results
 gamma_df = vario(
-    gdf_PAIPR, lag_size=250, vars=['accum_mu', 'accum_res'], 
+    gdf_PAIPR, lag_size=200, vars=['accum_mu', 'accum_res'], 
     scale=True)
 
 # Generate random noise with matched characteristics to PAIPR results
@@ -445,13 +450,13 @@ gdf_noise['accum_res'] = np.random.normal(
 
 # Calculate variogram for random noise results
 gamma_noise = vario(
-    gdf_noise, lag_size=250, vars=['accum_mu', 'accum_res'], 
+    gdf_noise, lag_size=200, vars=['accum_mu', 'accum_res'], 
     scale=True)
 
 # %% Plots/exploration of semivariograms
 
 # According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
-threshold = gamma_df['dist'].max()/2
+threshold = (3/5)*gamma_df['dist'].max()
 data1 = gamma_df.query('dist <= @threshold')
 data2 = gamma_noise.query('dist <= @threshold')
 
@@ -474,6 +479,56 @@ data2.plot(
     kind='scatter', ax=ax2, color='red', 
     x='lag_cent', y='accum_res', label='Noise')
 plt.title('Accumulation residual variogram')
+
+# %% Download missing REMA data
+
+# Set REMA data directory
+REMA_DIR = Path(
+    '/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA')
+
+# Import shapefile of DEM tile locations
+dem_index = gpd.read_file(REMA_DIR.joinpath(
+    'REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp'))
+
+# Keep only DEMs that contain accum traces
+dem_index = (
+    gpd.sjoin(dem_index, gdf_PAIPR, op='contains').iloc[
+        :,0:dem_index.shape[1]]).drop_duplicates()
+
+# Find and download missing REMA DSM tiles
+tiles_list = pd.DataFrame(
+    dem_index.drop(columns='geometry'))
+get_REMA(tiles_list, REMA_DIR.joinpath('tiles_8m_v1.1'))
+
+# %% Calculate slope/aspect for all REMA tiles
+
+# Generate list of paths to downloaded DEMs required for topo calculations at given points
+dem_list = [
+    path for path 
+    in REMA_DIR.joinpath("tiles_8m_v1.1").glob('**/*dem.tif') 
+    if any(tile in str(path) for tile in dem_index.tile)]
+
+# Calculate slope and aspect for each DEM
+[calc_topo(dem) for dem in dem_list]
+
+# %%
+
+# Extract elevation, slope, and aspect values for each trace 
+# location
+tif_dirs = [path.parent for path in dem_list]
+for path in tif_dirs:
+    gdf_PAIPR = topo_vals(
+        path, gdf_PAIPR, slope=True, aspect=True)
+
+# Set elev/slope/aspect to NaN for locations where elev<0
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'elev'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'slope'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'aspect'] = np.nan
+
+# Remove extreme slope values
+gdf_PAIPR.loc[gdf_PAIPR['slope']>60,'slope'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'elev'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'aspect'] = np.nan
 
 # %%[markdown]
 # ## 2011 PAIPR-manual comparions
