@@ -347,287 +347,6 @@ paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 # paipr_1to1_plt_comb
 
 # %%[markdown]
-# ## Investigations of spatial variability
-#  
-# %% Spatial coherence and variability
-
-def vario(
-    points_gdf, lag_size, 
-    d_metric='euclidean', vars='all', 
-    stationarize=False, scale=True):
-    """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
-
-    Args:
-        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
-        lag_size (int): The size of the lagging interval to use for binning semivariance values.
-        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
-        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
-        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
-
-    Returns:
-        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
-    """
-
-    # Get column names if 'all' is selected for "vars"
-    if vars == "all":
-        vars = points_gdf.drop(
-            columns='geometry').columns
-
-    # Extact trace coordinates and calculate pairwise distance
-    locs_arr = np.array(
-        [points_gdf.geometry.x, points_gdf.geometry.y]).T
-    dist_arr = pdist(locs_arr, metric=d_metric)
-
-    # Calculate the indices used for each pairwise calculation
-    i_idx = np.empty(dist_arr.shape)
-    j_idx = np.empty(dist_arr.shape)
-    m = locs_arr.shape[0]
-    for i in range(m):
-        for j in range(m):
-            if i < j < m:
-                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
-                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
-
-
-    if stationarize:
-        pass
-    
-    # Create dfs for paired-point values
-    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
-        drop=True)
-    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
-        drop=True)
-
-    # Calculate squared difference bewteen variable values
-    sqdiff_df = (i_vals - j_vals)**2
-    sqdiff_df['dist'] = dist_arr
-
-    # Create array of lag interval endpoints
-    d_max = lag_size * (dist_arr.max() // lag_size + 1)
-    lags = np.arange(0,d_max+1,lag_size)
-
-    # Group variables based on lagged distance intervals
-    df_groups = sqdiff_df.groupby(
-        pd.cut(sqdiff_df['dist'], lags))
-
-    # Calculate semivariance at each lag for each variable
-    gamma_vals = (1/2)*df_groups[vars].mean()
-    gamma_vals.index.name = 'lag'
-
-    if scale:
-        gamma_df = gamma_vals / gamma_vals.max()
-    else:
-        gamma_df = gamma_vals
-
-    # Add distance, lag center, and count values to output
-    gamma_df['dist'] = df_groups['dist'].mean()
-    gamma_df['lag_cent'] = lags[1::]-lag_size//2
-    gamma_df['cnt'] = df_groups['dist'].count()
-
-    return gamma_df
-
-# %%
-
-# Calculate variogram for PAIPR results
-gamma_df = vario(
-    gdf_PAIPR, lag_size=200, vars=['accum_mu', 'accum_res'], 
-    scale=True)
-
-# Generate random noise with matched characteristics to PAIPR results
-gdf_noise = gdf_PAIPR.copy()[
-    ['geometry', 'accum_mu', 'accum_res']]
-gdf_noise['accum_mu'] = np.random.normal(
-    loc=gdf_noise['accum_mu'].mean(), 
-    scale=gdf_noise['accum_mu'].std(), 
-    size=gdf_noise.shape[0])
-gdf_noise['accum_res'] = np.random.normal(
-    loc=gdf_noise['accum_res'].mean(), 
-    scale=gdf_noise['accum_res'].std(), 
-    size=gdf_noise.shape[0])
-
-# Calculate variogram for random noise results
-gamma_noise = vario(
-    gdf_noise, lag_size=200, vars=['accum_mu', 'accum_res'], 
-    scale=True)
-
-# %% Plots/exploration of semivariograms
-
-# According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
-threshold = (3/5)*gamma_df['dist'].max()
-data1 = gamma_df.query('dist <= @threshold')
-data2 = gamma_noise.query('dist <= @threshold')
-
-# Plot of mean accum variograms between PAIPR and noise
-fig1, ax1 = plt.subplots()
-data1.plot(
-    kind='scatter', ax=ax1, color='blue', 
-    x='lag_cent', y='accum_mu', label='Real data')
-data2.plot(
-    kind='scatter', ax=ax1, color='red', 
-    x='lag_cent', y='accum_mu', label='Noise')
-plt.title('Mean accumulation variogram')
-
-# Plot of accum residuals variograms between PAIPR and noise
-fig2, ax2 = plt.subplots()
-data1.plot(
-    kind='scatter', ax=ax2, color='blue', 
-    x='lag_cent', y='accum_res', label='Real data')
-data2.plot(
-    kind='scatter', ax=ax2, color='red', 
-    x='lag_cent', y='accum_res', label='Noise')
-plt.title('Accumulation residual variogram')
-
-# %% Download missing REMA data
-
-# Set REMA data directory
-REMA_DIR = Path(
-    '/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA')
-
-# Import shapefile of DEM tile locations
-dem_index = gpd.read_file(REMA_DIR.joinpath(
-    'REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp'))
-
-# Keep only DEMs that contain accum traces
-dem_index = (
-    gpd.sjoin(dem_index, gdf_PAIPR, op='contains').iloc[
-        :,0:dem_index.shape[1]]).drop_duplicates()
-
-# Find and download missing REMA DSM tiles
-tiles_list = pd.DataFrame(
-    dem_index.drop(columns='geometry'))
-get_REMA(tiles_list, REMA_DIR.joinpath('tiles_8m_v1.1'))
-
-# %% Calculate slope/aspect for all REMA tiles
-
-# Generate list of paths to downloaded DEMs required for topo calculations at given points
-dem_list = [
-    path for path 
-    in REMA_DIR.joinpath("tiles_8m_v1.1").glob('**/*dem.tif') 
-    if any(tile in str(path) for tile in dem_index.tile)]
-
-# Calculate slope and aspect for each DEM (only ones not already present)
-[calc_topo(dem) for dem in dem_list]
-
-# %%
-
-# Extract elevation, slope, and aspect values for each trace 
-# location
-tif_dirs = [path.parent for path in dem_list]
-for path in tif_dirs:
-    gdf_PAIPR = topo_vals(
-        path, gdf_PAIPR, slope=True, aspect=True)
-
-# Set elev/slope/aspect to NaN for locations where elev<0
-gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'elev'] = np.nan
-gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'slope'] = np.nan
-gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'aspect'] = np.nan
-
-# Remove extreme slope values
-gdf_PAIPR.loc[gdf_PAIPR['slope']>60,'slope'] = np.nan
-gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'elev'] = np.nan
-gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'aspect'] = np.nan
-
-# %% Extract flight parameters
-
-def get_FlightData(flight_dir):
-    """Function to extract OIB flight parameter data from .nc files and convert to geodataframe.
-
-    Args:
-        flight_dir (pathlib.PosixPath): The directory containing the .nc OIB files to extract and convert.
-
-    Returns:
-        geopandas.geodataframe.GeoDataFrame: Table of OIB flight parameters (altitude, heading, lat, lon, pitch, and roll) with their corresponding surface location and collection time.
-    """
-    # List of files to extract from
-    nc_files = [file for file in flight_dir.glob('*.nc')]
-    
-    # Load as xarray dataset
-    xr_flight = xr.open_dataset(
-        nc_files.pop(0))[[
-            'altitude', 'heading', 'lat', 
-            'lon', 'pitch','roll']]
-
-    # Concatenate data from all flights in directory
-    for file in nc_files:
-
-        flight_i = xr.open_dataset(file)[[
-            'altitude', 'heading', 'lat', 
-            'lon', 'pitch','roll']]
-        xr_flight = xr.concat(
-            [xr_flight, flight_i], dim='time')
-
-    # Convert to dataframe and average values to ~200 m resolution
-    flight_data = xr_flight.to_dataframe()
-    flight_coarse = flight_data.rolling(
-        window=40, min_periods=1).mean().iloc[0::40]
-
-    # Convert to geodataframe in Antarctic coordinates
-    gdf_flight = gpd.GeoDataFrame(
-        data=flight_coarse.drop(columns=['lat', 'lon']), 
-        geometry=gpd.points_from_xy(
-            flight_coarse.lon, flight_coarse.lat), 
-        crs='EPSG:4326').reset_index().to_crs(epsg=3031)
-
-    return gdf_flight
-
-
-def path_dist(locs):
-    """Function to calculate the cummulative distance between points along a given path.
-
-    Args:
-        locs (numpy.ndarray): 2D array of points along the path to calculate distance.
-    """
-    # Preallocate array for distances between adjacent points
-    dist_seg = np.empty(locs.shape[0])
-
-    # Calculate the distances bewteen adjacent points in array
-    for i in range(locs.shape[0]):
-        if i == 0:
-            dist_seg[i] = 0
-        else:
-            pos_0 = locs[i-1]
-            pos = locs[i]
-            dist_seg[i] = np.sqrt(
-                (pos[0] - pos_0[0])**2 
-                + (pos[1] - pos_0[1])**2)
-
-    # Find cummulative path distance along given array
-    dist_cum = np.cumsum(dist_seg)
-
-    return dist_cum
-
-#%%
-
-# Assign OIB flight data directory
-OIB_DIR = Path(
-    '/media/durbank/WARP/Research/Antarctica/Data/IceBridge/WAIS-central')
-gdf_flight2011 = get_FlightData(OIB_DIR.joinpath('20111109'))
-gdf_flight2016 = get_FlightData(OIB_DIR.joinpath('20161109'))
-
-# locs_2011 = np.array([
-#     gdf_flight2011.geometry.x, 
-#     gdf_flight2011.geometry.y]).T
-
-# dist_2011 = path_dist(locs_2011)
-
-# %% Add intersecting flight parameter data to PAIPR gdf
-
-# Find nearest neighbors between gdf_PAIPR and gdf_flight2011
-dist_2011 = nearest_neighbor(
-    gdf_PAIPR, gdf_flight2011, 
-    return_dist=True).drop(
-        columns=['time', 'geometry']).add_suffix('_2011')
-gdf_PAIPR = gdf_PAIPR.join(dist_2011)
-
-# Find nearest neighbors between gdf_PAIPR and gdf_flight2016
-dist_2016 = nearest_neighbor(
-    gdf_PAIPR, gdf_flight2016, 
-    return_dist=True).drop(
-        columns=['time', 'geometry']).add_suffix('_2016')
-
-gdf_PAIPR = gdf_PAIPR.join(dist_2016)
-
-# %%[markdown]
 # ## 2011 PAIPR-manual comparions
 # 
 # %%
@@ -1211,6 +930,308 @@ tsfig_PAIPR = plot_TScomp(
     yaxis=True, xlims=[1990,2010], ylims=[80,700],
     labels=['2011 PAIPR', '2016 PAIPR'], 
     ts_err1=std_2011, ts_err2=std_2016)
+
+
+
+
+# %%[markdown]
+# ## Investigations of spatial variability
+#  
+# %% Spatial coherence and variability
+
+def vario(
+    points_gdf, lag_size, 
+    d_metric='euclidean', vars='all', 
+    stationarize=False, scale=True):
+    """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
+
+    Args:
+        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
+        lag_size (int): The size of the lagging interval to use for binning semivariance values.
+        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
+        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
+        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
+
+    Returns:
+        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
+    """
+
+    # Get column names if 'all' is selected for "vars"
+    if vars == "all":
+        vars = points_gdf.drop(
+            columns='geometry').columns
+
+    # Extact trace coordinates and calculate pairwise distance
+    locs_arr = np.array(
+        [points_gdf.geometry.x, points_gdf.geometry.y]).T
+    dist_arr = pdist(locs_arr, metric=d_metric)
+
+    # Calculate the indices used for each pairwise calculation
+    i_idx = np.empty(dist_arr.shape)
+    j_idx = np.empty(dist_arr.shape)
+    m = locs_arr.shape[0]
+    for i in range(m):
+        for j in range(m):
+            if i < j < m:
+                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
+                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
+
+
+    if stationarize:
+        pass
+    
+    # Create dfs for paired-point values
+    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
+        drop=True)
+    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
+        drop=True)
+
+    # Calculate squared difference bewteen variable values
+    sqdiff_df = (i_vals - j_vals)**2
+    sqdiff_df['dist'] = dist_arr
+
+    # Create array of lag interval endpoints
+    d_max = lag_size * (dist_arr.max() // lag_size + 1)
+    lags = np.arange(0,d_max+1,lag_size)
+
+    # Group variables based on lagged distance intervals
+    df_groups = sqdiff_df.groupby(
+        pd.cut(sqdiff_df['dist'], lags))
+
+    # Calculate semivariance at each lag for each variable
+    gamma_vals = (1/2)*df_groups[vars].mean()
+    gamma_vals.index.name = 'lag'
+
+    if scale:
+        gamma_df = gamma_vals / gamma_vals.max()
+    else:
+        gamma_df = gamma_vals
+
+    # Add distance, lag center, and count values to output
+    gamma_df['dist'] = df_groups['dist'].mean()
+    gamma_df['lag_cent'] = lags[1::]-lag_size//2
+    gamma_df['cnt'] = df_groups['dist'].count()
+
+    return gamma_df
+
+# %%
+
+# Calculate variogram for PAIPR results
+gamma_df = vario(
+    gdf_PAIPR, lag_size=200, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# Generate random noise with matched characteristics to PAIPR results
+gdf_noise = gdf_PAIPR.copy()[
+    ['geometry', 'accum_mu', 'accum_res']]
+gdf_noise['accum_mu'] = np.random.normal(
+    loc=gdf_noise['accum_mu'].mean(), 
+    scale=gdf_noise['accum_mu'].std(), 
+    size=gdf_noise.shape[0])
+gdf_noise['accum_res'] = np.random.normal(
+    loc=gdf_noise['accum_res'].mean(), 
+    scale=gdf_noise['accum_res'].std(), 
+    size=gdf_noise.shape[0])
+
+# Calculate variogram for random noise results
+gamma_noise = vario(
+    gdf_noise, lag_size=200, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# %% Plots/exploration of semivariograms
+
+# According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
+threshold = (3/5)*gamma_df['dist'].max()
+data1 = gamma_df.query('dist <= @threshold')
+data2 = gamma_noise.query('dist <= @threshold')
+
+# Plot of mean accum variograms between PAIPR and noise
+fig1, ax1 = plt.subplots()
+data1.plot(
+    kind='scatter', ax=ax1, color='blue', 
+    x='lag_cent', y='accum_mu', label='Real data')
+data2.plot(
+    kind='scatter', ax=ax1, color='red', 
+    x='lag_cent', y='accum_mu', label='Noise')
+plt.title('Mean accumulation variogram')
+
+# Plot of accum residuals variograms between PAIPR and noise
+fig2, ax2 = plt.subplots()
+data1.plot(
+    kind='scatter', ax=ax2, color='blue', 
+    x='lag_cent', y='accum_res', label='Real data')
+data2.plot(
+    kind='scatter', ax=ax2, color='red', 
+    x='lag_cent', y='accum_res', label='Noise')
+plt.title('Accumulation residual variogram')
+
+# %% Download missing REMA data
+
+# Set REMA data directory
+REMA_DIR = Path(
+    '/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA')
+
+# Import shapefile of DEM tile locations
+dem_index = gpd.read_file(REMA_DIR.joinpath(
+    'REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp'))
+
+# Keep only DEMs that contain accum traces
+dem_index = (
+    gpd.sjoin(dem_index, gdf_PAIPR, op='contains').iloc[
+        :,0:dem_index.shape[1]]).drop_duplicates()
+
+# Find and download missing REMA DSM tiles
+tiles_list = pd.DataFrame(
+    dem_index.drop(columns='geometry'))
+get_REMA(tiles_list, REMA_DIR.joinpath('tiles_8m_v1.1'))
+
+# %% Calculate slope/aspect for all REMA tiles
+
+# Generate list of paths to downloaded DEMs required for topo calculations at given points
+dem_list = [
+    path for path 
+    in REMA_DIR.joinpath("tiles_8m_v1.1").glob('**/*dem.tif') 
+    if any(tile in str(path) for tile in dem_index.tile)]
+
+# Calculate slope and aspect for each DEM (only ones not already present)
+[calc_topo(dem) for dem in dem_list]
+
+# %%
+
+# Extract elevation, slope, and aspect values for each trace 
+# location
+tif_dirs = [path.parent for path in dem_list]
+for path in tif_dirs:
+    gdf_PAIPR = topo_vals(
+        path, gdf_PAIPR, slope=True, aspect=True)
+
+# Set elev/slope/aspect to NaN for locations where elev<0
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'elev'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'slope'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'aspect'] = np.nan
+
+# Remove extreme slope values
+gdf_PAIPR.loc[gdf_PAIPR['slope']>60,'slope'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'elev'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'aspect'] = np.nan
+
+# %% Extract flight parameters
+
+def get_FlightData(flight_dir):
+    """Function to extract OIB flight parameter data from .nc files and convert to geodataframe.
+
+    Args:
+        flight_dir (pathlib.PosixPath): The directory containing the .nc OIB files to extract and convert.
+
+    Returns:
+        geopandas.geodataframe.GeoDataFrame: Table of OIB flight parameters (altitude, heading, lat, lon, pitch, and roll) with their corresponding surface location and collection time.
+    """
+    # List of files to extract from
+    nc_files = [file for file in flight_dir.glob('*.nc')]
+    
+    # Load as xarray dataset
+    xr_flight = xr.open_dataset(
+        nc_files.pop(0))[[
+            'altitude', 'heading', 'lat', 
+            'lon', 'pitch','roll']]
+
+    # Concatenate data from all flights in directory
+    for file in nc_files:
+
+        flight_i = xr.open_dataset(file)[[
+            'altitude', 'heading', 'lat', 
+            'lon', 'pitch','roll']]
+        xr_flight = xr.concat(
+            [xr_flight, flight_i], dim='time')
+
+    # Convert to dataframe and average values to ~200 m resolution
+    flight_data = xr_flight.to_dataframe()
+    flight_coarse = flight_data.rolling(
+        window=40, min_periods=1).mean().iloc[0::40]
+
+    # Convert to geodataframe in Antarctic coordinates
+    gdf_flight = gpd.GeoDataFrame(
+        data=flight_coarse.drop(columns=['lat', 'lon']), 
+        geometry=gpd.points_from_xy(
+            flight_coarse.lon, flight_coarse.lat), 
+        crs='EPSG:4326').reset_index().to_crs(epsg=3031)
+
+    return gdf_flight
+
+
+def path_dist(locs):
+    """Function to calculate the cummulative distance between points along a given path.
+
+    Args:
+        locs (numpy.ndarray): 2D array of points along the path to calculate distance.
+    """
+    # Preallocate array for distances between adjacent points
+    dist_seg = np.empty(locs.shape[0])
+
+    # Calculate the distances bewteen adjacent points in array
+    for i in range(locs.shape[0]):
+        if i == 0:
+            dist_seg[i] = 0
+        else:
+            pos_0 = locs[i-1]
+            pos = locs[i]
+            dist_seg[i] = np.sqrt(
+                (pos[0] - pos_0[0])**2 
+                + (pos[1] - pos_0[1])**2)
+
+    # Find cummulative path distance along given array
+    dist_cum = np.cumsum(dist_seg)
+
+    return dist_cum
+
+#%%
+
+# # Assign OIB flight data directory
+# OIB_DIR = Path(
+#     '/media/durbank/WARP/Research/Antarctica/Data/IceBridge/WAIS-central')
+# gdf_flight2011 = get_FlightData(OIB_DIR.joinpath('20111109'))
+# gdf_flight2016 = get_FlightData(OIB_DIR.joinpath('20161109'))
+
+# # Save data for future use (cuts repetative computation time)
+# gdf_flight2011.to_file(
+#     ROOT_DIR.joinpath('data/flight_params/flight_20111109.geojson'), 
+#     driver='GeoJSON')
+# gdf_flight2016.to_file(
+#     ROOT_DIR.joinpath('data/flight_params/flight_20161109.geojson'), 
+#     driver='GeoJSON')
+
+# Load flight parameter data
+gdf_flight2011 = gpd.read_file(
+    ROOT_DIR.joinpath('data/flight_params/flight_20111109.geojson'))
+gdf_flight2016 = gpd.read_file(
+    ROOT_DIR.joinpath('data/flight_params/flight_20161109.geojson'))
+
+# locs_2011 = np.array([
+#     gdf_flight2011.geometry.x, 
+#     gdf_flight2011.geometry.y]).T
+
+# dist_2011 = path_dist(locs_2011)
+
+# %% Add intersecting flight parameter data to PAIPR gdf
+
+# Find nearest neighbors between gdf_PAIPR and gdf_flight2011
+dist_2011 = nearest_neighbor(
+    gdf_PAIPR, gdf_flight2011, 
+    return_dist=True).drop(
+        columns=['time', 'geometry']).add_suffix('_2011')
+gdf_PAIPR = gdf_PAIPR.join(dist_2011)
+
+# Find nearest neighbors between gdf_PAIPR and gdf_flight2016
+dist_2016 = nearest_neighbor(
+    gdf_PAIPR, gdf_flight2016, 
+    return_dist=True).drop(
+        columns=['time', 'geometry']).add_suffix('_2016')
+
+gdf_PAIPR = gdf_PAIPR.join(dist_2016)
+
+
+
+
 
 # %%[markdown]
 # ## Final figures used in article
