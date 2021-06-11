@@ -527,6 +527,106 @@ gdf_PAIPR.loc[gdf_PAIPR['slope']>60,'slope'] = np.nan
 gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'elev'] = np.nan
 gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'aspect'] = np.nan
 
+# %% Extract flight parameters
+
+def get_FlightData(flight_dir):
+    """Function to extract OIB flight parameter data from .nc files and convert to geodataframe.
+
+    Args:
+        flight_dir (pathlib.PosixPath): The directory containing the .nc OIB files to extract and convert.
+
+    Returns:
+        geopandas.geodataframe.GeoDataFrame: Table of OIB flight parameters (altitude, heading, lat, lon, pitch, and roll) with their corresponding surface location and collection time.
+    """
+    # List of files to extract from
+    nc_files = [file for file in flight_dir.glob('*.nc')]
+    
+    # Load as xarray dataset
+    xr_flight = xr.open_dataset(
+        nc_files.pop(0))[[
+            'altitude', 'heading', 'lat', 
+            'lon', 'pitch','roll']]
+
+    # Concatenate data from all flights in directory
+    for file in nc_files:
+
+        flight_i = xr.open_dataset(file)[[
+            'altitude', 'heading', 'lat', 
+            'lon', 'pitch','roll']]
+        xr_flight = xr.concat(
+            [xr_flight, flight_i], dim='time')
+
+    # Convert to dataframe and average values to ~200 m resolution
+    flight_data = xr_flight.to_dataframe()
+    flight_coarse = flight_data.rolling(
+        window=40, min_periods=1).mean().iloc[0::40]
+
+    # Convert to geodataframe in Antarctic coordinates
+    gdf_flight = gpd.GeoDataFrame(
+        data=flight_coarse.drop(columns=['lat', 'lon']), 
+        geometry=gpd.points_from_xy(
+            flight_coarse.lon, flight_coarse.lat), 
+        crs='EPSG:4326').reset_index().to_crs(epsg=3031)
+
+    return gdf_flight
+
+
+def path_dist(locs):
+    """Function to calculate the cummulative distance between points along a given path.
+
+    Args:
+        locs (numpy.ndarray): 2D array of points along the path to calculate distance.
+    """
+    # Preallocate array for distances between adjacent points
+    dist_seg = np.empty(locs.shape[0])
+
+    # Calculate the distances bewteen adjacent points in array
+    for i in range(locs.shape[0]):
+        if i == 0:
+            dist_seg[i] = 0
+        else:
+            pos_0 = locs[i-1]
+            pos = locs[i]
+            dist_seg[i] = np.sqrt(
+                (pos[0] - pos_0[0])**2 
+                + (pos[1] - pos_0[1])**2)
+
+    # Find cummulative path distance along given array
+    dist_cum = np.cumsum(dist_seg)
+
+    return dist_cum
+
+#%%
+
+# Assign OIB flight data directory
+OIB_DIR = Path(
+    '/media/durbank/WARP/Research/Antarctica/Data/IceBridge/WAIS-central')
+gdf_flight2011 = get_FlightData(OIB_DIR.joinpath('20111109'))
+gdf_flight2016 = get_FlightData(OIB_DIR.joinpath('20161109'))
+
+# locs_2011 = np.array([
+#     gdf_flight2011.geometry.x, 
+#     gdf_flight2011.geometry.y]).T
+
+# dist_2011 = path_dist(locs_2011)
+
+# %% Add intersecting flight parameter data to PAIPR gdf
+
+# Find nearest neighbors between gdf_PAIPR and gdf_flight2011
+dist_2011 = nearest_neighbor(
+    gdf_PAIPR, gdf_flight2011, 
+    return_dist=True).drop(
+        columns=['time', 'geometry']).add_suffix('_2011')
+gdf_PAIPR = gdf_PAIPR.join(dist_2011)
+
+# Find nearest neighbors between gdf_PAIPR and gdf_flight2016
+dist_2016 = nearest_neighbor(
+    gdf_PAIPR, gdf_flight2016, 
+    return_dist=True).drop(
+        columns=['time', 'geometry']).add_suffix('_2016')
+
+gdf_PAIPR = gdf_PAIPR.join(dist_2016)
+
 # %%[markdown]
 # ## 2011 PAIPR-manual comparions
 # 
