@@ -11,11 +11,13 @@ import matplotlib.pyplot as plt
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
-from bokeh.io import output_notebook
 from shapely.geometry import Point
-output_notebook()
+# from bokeh.io import output_notebook
+# output_notebook()
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
+# hv.extension('matplotlib')
+# gv.extension('matplotlib')
 import panel as pn
 import seaborn as sns
 import xarray as xr
@@ -192,11 +194,6 @@ plt_labels = hv.Labels(
         yoffset=20000, text_color='black', 
         text_font_size='28pt')
 
-# (
-#     plt_locCOMB * plt_manPTS 
-#     * (plt_accum2011 * plt_accum2016) * plt_labels
-# )
-
 # %%
 
 # Define Antarctic DEM file
@@ -288,7 +285,7 @@ for label in chunk_centers['Site']:
         crs=gdf_PAIPR.crs).distance(
             gdf_PAIPR.reset_index()) <= 30000).values
     
-    gdf_PAIPR['Site'][idx] = label
+    gdf_PAIPR.loc[idx,'Site'] = label
 
 # Create dataframes for scatter plots
 PAIPR_df = pd.DataFrame(
@@ -508,7 +505,7 @@ dem_list = [
     in REMA_DIR.joinpath("tiles_8m_v1.1").glob('**/*dem.tif') 
     if any(tile in str(path) for tile in dem_index.tile)]
 
-# Calculate slope and aspect for each DEM
+# Calculate slope and aspect for each DEM (only ones not already present)
 [calc_topo(dem) for dem in dem_list]
 
 # %%
@@ -1649,6 +1646,97 @@ cont_bar = cont_plt.opts(
     colorbar=True, fontscale=2.5, width=1200, height=1200)
 hv.save(cont_bar, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/cont_bar.png'))
+
+
+
+
+# %% matplotlib versions
+
+# plt_accum2011 = gv.Points(
+#     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
+#         projection=ANT_proj, color='accum', 
+#         cmap='viridis', colorbar=True, s=50)
+# plt_accum2016 = gv.Points(
+#     gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
+#         projection=ANT_proj, color='accum', 
+#         cmap='viridis', colorbar=True, s=50)
+
+# # plt_loc2011 = gv.Points(
+# #     gdf_2011, crs=ANT_proj, vdims=['accum','std']).opts(
+# #         projection=ANT_proj, color='blue', alpha=0.9, 
+# #         s=25)
+# # plt_loc2016 = gv.Points(
+# #     gdf_2016, crs=ANT_proj, vdims=['accum','std']).opts(
+# #         projection=ANT_proj, color='red', alpha=0.9, 
+# #         s=25)
+# plt_locCOMB = gv.Points(
+#     gdf_PAIPR, crs=ANT_proj, 
+#     vdims=['accum_2011','accum_2016']).opts(
+#         projection=ANT_proj, color='orange', 
+#         s=200)
+
+
+
+# plt_manPTS = gv.Points(
+#     chunk_centers, crs=ANT_proj, 
+#     vdims='Site').opts(
+#         projection=ANT_proj, color='black', 
+#         s=350, marker='s')
+
+# plt_labels = hv.Labels(
+#     {'x': chunk_centers.geometry.x.values, 
+#     'y': chunk_centers.geometry.y.values, 
+#     'text': chunk_centers.Site.values}, 
+#     ['x','y'], 'text').opts(
+#         yoffset=20000, color='black', 
+#         size=28)
+
+
+
+# elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
+#     cmap='dimgray', colorbar=False)
+
+# # Generate contour plot
+# cont_plt = hv.operation.contours(elev_plt, levels=15).opts(
+#     cmap='cividis', show_legend=False, 
+#     colorbar=True, linewidth=2)
+
+# # Generate elevation hillshade
+# xr_HS = hillshade(xr_DEM)
+# hill_plt = hv.Image(xr_HS.values, bounds=tpl_bnds).opts(
+#         alpha=0.25, cmap='gray', colorbar=False)
+
+# # Residuals plot
+# plt_res = gv.Points(
+#     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
+#         projection=ANT_proj, color='accum_res', s=50,
+#         colorbar=True, cmap='coolwarm_r', symmetric=True)
+# plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
+
+
+
+
+# data_map = (
+#     hill_plt
+#     * cont_plt.opts(colorbar=False)
+#     * plt_locCOMB * plt_manPTS 
+#     * (plt_accum2011 * plt_accum2016) 
+#     * plt_labels.opts(size=36)
+#     ).opts(fontscale=2, aspect=1, fig_inches=12)
+
+# res_map = (
+#     hill_plt
+#     * cont_plt.opts(colorbar=False)
+#     * (plt_manPTS*plt_res)
+#     * plt_labels.opts(size=36)
+#     ).opts(
+#         fontscale=1.5, fig_inches=12)
+
+
+
+
+
+
 
 # %%
 
