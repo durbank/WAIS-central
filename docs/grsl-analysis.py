@@ -1930,7 +1930,162 @@ df_depths['depth_res'] = (
 hv.Distribution(df_depths, kdims=['depth_res'], vdims=['Year']).groupby('Year')
 
 
+# %% Compare PAIPR results from different random seeds
 
+# Import old 20111109 results
+dir_old = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109')
+data_old = import_PAIPR(dir_old)
+data_old.query('QC_flag != 2', inplace=True)
+smb_old = data_old.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+data_test = format_PAIPR(
+    smb_old, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1)
+aTest_ALL = data_test.pivot(
+    index='Year', columns='trace_ID', values='accum')
+stdTest_ALL = data_test.pivot(
+    index='Year', columns='trace_ID', values='std')
+
+# Import current 20111109 results
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
+data_raw = import_PAIPR(dir1)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+data_2011 = format_PAIPR(
+    data_0, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1)
+a2011_ALL = data_2011.pivot(
+    index='Year', columns='trace_ID', values='accum')
+std2011_ALL = data_2011.pivot(
+    index='Year', columns='trace_ID', values='std')
+
+# Create gdf of mean results for each trace and 
+# transform to Antarctic Polar Stereographic
+gdf_TestData = long2gdf(data_test)
+gdf_TestData.to_crs(epsg=3031, inplace=True)
+gdf_2011 = long2gdf(data_2011)
+gdf_2011.to_crs(epsg=3031, inplace=True)
+
+df_dist = nearest_neighbor(
+    gdf_2011, gdf_TestData, return_dist=True)
+idx_paipr = df_dist['distance'] <= 100
+dist_overlap = df_dist[idx_paipr]
+
+# Create numpy arrays for relevant results
+accum_2011_test = a2011_ALL.iloc[
+    :,dist_overlap.index]
+std_2011_test = std2011_ALL.iloc[
+    :,dist_overlap.index]
+accum_test = aTest_ALL.iloc[
+    :,dist_overlap['trace_ID']]
+std_test = stdTest_ALL.iloc[
+    :,dist_overlap['trace_ID']]
+
+# Create new gdf of subsetted results
+gdf_test = gpd.GeoDataFrame(
+    {'ID_2011': dist_overlap.index.values, 
+    'ID_test': dist_overlap['trace_ID'].values, 
+    'trace_dist': dist_overlap['distance'].values,
+    'accum_2011': 
+        accum_2011_test.mean(axis=0).values, 
+    'accum_test': 
+        accum_test.mean(axis=0).values},
+    geometry=dist_overlap.geometry.values)
+
+# Calculate bulk accum mean and accum residual
+gdf_test['accum_mu'] = gdf_test[
+    ['accum_2011', 'accum_test']].mean(axis=1)
+gdf_test['accum_res'] = (
+    (gdf_test.accum_test - gdf_test.accum_2011) 
+    / gdf_test.accum_mu)
+
+gv.Points(
+    gdf_test, vdims=['accum_mu', 'accum_res'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='accum_res', size=5, 
+        cmap='coolwarm_r', colorbar=True, symmetric=True, 
+        tools=['hover'], height=750, width=750)
+
+
+
+
+
+# Generate indices corresponding to desired sites
+gdf_test['Site'] = np.repeat(
+    'Null', gdf_test.shape[0])
+for label in chunk_centers['Site']:
+
+    geom = chunk_centers.query('Site == @label').geometry
+    idx = (gpd.GeoSeries(
+        data=gpd.points_from_xy(
+            np.repeat(geom.x, gdf_test.shape[0]), 
+            np.repeat(geom.y, gdf_test.shape[0])), 
+        crs=gdf_test.crs).distance(
+            gdf_test.reset_index()) <= 30000).values
+    
+    gdf_test.loc[idx,'Site'] = label
+
+# Create dataframes for scatter plots
+PAIPR_df = pd.DataFrame(
+    {'tmp_ID': np.tile(
+        np.arange(0,accum_2011_test.shape[1]), 
+        accum_2011_test.shape[0]), 
+    'Site': np.tile(
+        gdf_test['Site'], accum_2011_test.shape[0]), 
+    'Year': np.reshape(
+        np.repeat(
+            accum_2011_test.index, accum_2011_test.shape[1]), 
+        accum_2011_test.size), 
+    'accum_2011': 
+        np.reshape(
+            accum_2011_test.values, accum_2011_test.size), 
+    'std_2011': np.reshape(
+        std_2011_test.values, std_2011_test.size), 
+    'accum_test': np.reshape(
+        accum_test.values, accum_test.size), 
+    'std_test': np.reshape(
+        std_test.values, std_test.size)})
+
+# Add residuals to dataframe
+PAIPR_df['res_accum'] = PAIPR_df['accum_test']-PAIPR_df['accum_2011']
+PAIPR_df['res_perc'] = (
+    100*(PAIPR_df['res_accum'])
+    /(PAIPR_df[['accum_test','accum_2011']]).mean(axis=1))
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+
+scatt_yr = hv.Points(
+    data=PAIPR_df, 
+    kdims=['accum_2011', 'accum_test'], 
+    vdims=['Year'])
+    
+test_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 PAIPR (mm/yr)', 
+    ylabel='Test PAIPR (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600, fontscale=1.75)
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+scatt_yr = hv.Points(
+    data=PAIPR_df, 
+    kdims=['accum_2011', 'accum_test'], 
+    vdims=['Year', 'Site']).groupby('Site')
+test_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 flight (mm/yr)', 
+    ylabel='Test flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600, fontscale=1.75)
+
+test_1to1_plt + site_res_plt
 
  # %%[markdown]
 # ## Matplotlib versions of final figures (WIP)
