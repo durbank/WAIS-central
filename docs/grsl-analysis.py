@@ -42,7 +42,7 @@ from my_functions import *
 # %% Import PAIPR-generated data
 
 # Import 20111109 results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109/')
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
 data_raw = import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -57,7 +57,7 @@ std2011_ALL = data_2011.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import 20161109 results
-dir2 = ROOT_DIR.joinpath('data/PAIPR-outputs/20161109/')
+dir2 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
 data_raw = import_PAIPR(dir2)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -101,6 +101,7 @@ std_2016 = std2016_ALL.iloc[
 gdf_PAIPR = gpd.GeoDataFrame(
     {'ID_2011': dist_overlap.index.values, 
     'ID_2016': dist_overlap['trace_ID'].values, 
+    'trace_dist': dist_overlap['distance'].values,
     'accum_2011': 
         accum_2011.mean(axis=0).values, 
     'accum_2016': 
@@ -352,7 +353,7 @@ paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 # %%
 
 # Import and format PAIPR results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109/')
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
 data_raw = import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -367,7 +368,8 @@ std2011_ALL = data_2011.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import and format manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20111109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2011 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -592,7 +594,7 @@ tmp_df1['flight'] = 2011
 # %% Import 20161109 results
 
 # Import and format PAIPR results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20161109/')
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
 data_raw = import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -607,7 +609,8 @@ std2016_ALL = data_2016.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import and format manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20161109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20161109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2016 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -756,7 +759,8 @@ PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
 # %% Import manual results
 
 # Get list of 2011 manual files
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20111109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2011 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -772,7 +776,8 @@ gdf_man2011 = long2gdf(man_2011)
 gdf_man2011.to_crs(epsg=3031, inplace=True)
 
 # Perform same for 2016 manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20161109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20161109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2016 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -1045,25 +1050,24 @@ threshold = (3/5)*gamma_df['dist'].max()
 data1 = gamma_df.query('dist <= @threshold')
 data2 = gamma_noise.query('dist <= @threshold')
 
-# Plot of mean accum variograms between PAIPR and noise
-fig1, ax1 = plt.subplots()
+# Plots of mean accum and accum residuals variograms between PAIPR and noise
+fig_var, axes = plt.subplots(1, 2, figsize=(24,9))
 data1.plot(
-    kind='scatter', ax=ax1, color='blue', 
+    kind='scatter', ax=axes[0], color='blue', 
     x='lag_cent', y='accum_mu', label='Real data')
 data2.plot(
-    kind='scatter', ax=ax1, color='red', 
+    kind='scatter', ax=axes[0], color='red', 
     x='lag_cent', y='accum_mu', label='Noise')
-plt.title('Mean accumulation variogram')
-
-# Plot of accum residuals variograms between PAIPR and noise
-fig2, ax2 = plt.subplots()
+axes[0].set_xlabel('Lag distance (m)')
+axes[0].set_ylabel('Mean accum variogram')
 data1.plot(
-    kind='scatter', ax=ax2, color='blue', 
+    kind='scatter', ax=axes[1], color='blue', 
     x='lag_cent', y='accum_res', label='Real data')
 data2.plot(
-    kind='scatter', ax=ax2, color='red', 
+    kind='scatter', ax=axes[1], color='red', 
     x='lag_cent', y='accum_res', label='Noise')
-plt.title('Accumulation residual variogram')
+axes[1].set_xlabel('Lag distance (m)')
+axes[1].set_ylabel('Accum residual variogram')
 
 # %% Download missing REMA data
 
@@ -1096,7 +1100,7 @@ dem_list = [
 # Calculate slope and aspect for each DEM (only ones not already present)
 [calc_topo(dem) for dem in dem_list]
 
-# %%
+# %% Extract topo values and add to PAIPR gdf
 
 # Extract elevation, slope, and aspect values for each trace 
 # location
@@ -1229,9 +1233,46 @@ dist_2016 = nearest_neighbor(
 
 gdf_PAIPR = gdf_PAIPR.join(dist_2016)
 
+# Add columns for plane distance above surface
+gdf_PAIPR['plane_elev2011'] = (
+    gdf_PAIPR['altitude_2011'] - gdf_PAIPR['elev'])
+gdf_PAIPR['plane_elev2016'] = (
+    gdf_PAIPR['altitude_2016'] - gdf_PAIPR['elev'])
 
+# Add column for absolute value of accum res
+gdf_PAIPR['res_abs'] = np.abs(gdf_PAIPR['accum_res'])
 
+# %% Paired correlation plots for variables
 
+# sns.pairplot(
+#     data=gdf_PAIPR, 
+#     vars=[
+#         'accum_res', 'trace_dist', 'elev', 'slope', 'aspect', 'altitude_2011', 'heading_2011', 'pitch_2011', 'roll_2011', 
+#         'altitude_2016', 'heading_2016', 'pitch_2016', 'roll_2016'], 
+#     kind='kde', dropna=True)
+
+sns.pairplot(
+    data=gdf_PAIPR, 
+    x_vars=[
+        'accum_res', 'res_abs', 'accum_mu', 
+        'trace_dist', 'elev', 'slope', 'aspect'],
+    y_vars=['accum_res', 'res_abs', 'accum_mu'], 
+    diag_kind='kde', dropna=True)
+
+sns.pairplot(
+    data=gdf_PAIPR, 
+    x_vars=['accum_res', 'res_abs', 
+        'plane_elev2011', 'heading_2011', 'pitch_2011', 'roll_2011'],
+        y_vars=['accum_res', 'res_abs'], 
+    diag_kind='kde', dropna=True)
+
+sns.pairplot(
+    data=gdf_PAIPR, 
+    x_vars=[
+        'accum_res', 'res_abs', 
+        'plane_elev2016', 'heading_2016', 'pitch_2016', 'roll_2016'], 
+    y_vars=['accum_res', 'res_abs'], 
+    diag_kind='kde', dropna=True)
 
 # %%[markdown]
 # ## Final figures used in article
@@ -1771,6 +1812,10 @@ hv.save(cont_bar, ROOT_DIR.joinpath(
 
 
 
+
+ # %%[markdown]
+# ## Matplotlib versions of final figures (WIP)
+#  
 # %% matplotlib versions
 
 # plt_accum2011 = gv.Points(
@@ -1857,6 +1902,18 @@ hv.save(cont_bar, ROOT_DIR.joinpath(
 
 
 
+
+
+
+
+
+
+
+
+
+# %%[markdown]
+
+# ## Other misc snippets of old code
 
 
 # %%
