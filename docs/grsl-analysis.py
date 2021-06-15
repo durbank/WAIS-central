@@ -1810,6 +1810,125 @@ hv.save(cont_bar, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/cont_bar.png'))
 
 
+# %%[markdown]
+# ## Investigations of depth variability and QC effect
+# 
+# %%
+
+# Import current 20111109 results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
+data_raw = import_PAIPR(dir_)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+smb_2011 = format_PAIPR(
+    data_0, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1).set_index(['collect_time', 'Year'])
+
+# Import 20111109 depth results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/depth/')
+depth_2011 = import_PAIPR(dir_).rename(
+    columns={"IHR_year":"Year"}).set_index(
+        ['collect_time', 'Year'])
+
+# Join 2011 dataframes and extract gdf locations
+df_depths2011 = smb_2011.join(
+    depth_2011.drop(columns=['Lat', 'Lon']), 
+    how='inner').reset_index().groupby(
+        ['trace_ID', 'Year']).mean()
+df_grouped2011 = df_depths2011[['Lat', 'Lon']].groupby(
+        'trace_ID').mean().reset_index()
+gdf_depth2011 = gpd.GeoDataFrame(
+    data=df_grouped2011.drop(columns=['Lat', 'Lon']), 
+    geometry=gpd.points_from_xy(
+        x=df_grouped2011.Lon, y=df_grouped2011.Lat), 
+    crs="EPSG:4326")
+gdf_depth2011.to_crs(epsg=3031, inplace=True)
+
+# ## Repeat for 2016 data
+
+# Import current 20161109 results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
+data_raw = import_PAIPR(dir_)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+smb_2016 = format_PAIPR(
+    data_0, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1).set_index(['collect_time', 'Year'])
+
+# Import 20161109 depth results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/depth/')
+depth_2016 = import_PAIPR(dir_).rename(
+    columns={"IHR_year":"Year"}).set_index(
+        ['collect_time', 'Year'])
+
+# Join 2016 dataframes and extract gdf locations
+df_depths2016 = smb_2016.join(
+    depth_2016.drop(columns=['Lat', 'Lon']), 
+    how='inner').reset_index().groupby(
+        ['trace_ID', 'Year']).mean()
+df_grouped2016 = df_depths2016[['Lat', 'Lon']].groupby(
+        'trace_ID').mean().reset_index()
+gdf_depth2016 = gpd.GeoDataFrame(
+    data=df_grouped2016.drop(columns=['Lat', 'Lon']), 
+    geometry=gpd.points_from_xy(
+        x=df_grouped2016.Lon, y=df_grouped2016.Lat), 
+    crs="EPSG:4326")
+gdf_depth2016.to_crs(epsg=3031, inplace=True)
+
+
+# Find nearest neighbors between 2011 and 2016 
+# (within 500 m)
+df_dist = nearest_neighbor(
+    gdf_depth2011, gdf_depth2016, return_dist=True)
+idx_paipr = df_dist['distance'] <= 250
+dist_overlap = df_dist[idx_paipr]
+
+
+yr_vals = np.arange(
+    df_depths2011.index.get_level_values(1).min(), 
+    df_depths2011.index.get_level_values(1).max()+1)
+
+
+ID_2011 = gdf_depth2011.loc[dist_overlap.index,'trace_ID'].values
+midx_2011 = pd.MultiIndex.from_arrays([
+    np.repeat(ID_2011, yr_vals.shape[0]), 
+    np.tile(yr_vals, ID_2011.shape[0])], 
+    names=['trace_ID', 'Year'])
+depths_2011 = df_depths2011.loc[midx_2011]
+
+ID_2016 = dist_overlap['trace_ID'].values
+midx_2016 = pd.MultiIndex.from_arrays([
+    np.repeat(ID_2016, yr_vals.shape[0]), 
+    np.tile(yr_vals, ID_2016.shape[0])], 
+    names=['trace_ID', 'Year'])
+depths_2016 = df_depths2016.loc[midx_2016]
+
+
+# Create new combined df for investigating depth differences
+df_depths = pd.DataFrame(
+    {'ID_new':np.repeat(
+        np.arange(depths_2011.shape[0]/yr_vals.shape[0]), 
+        yr_vals.shape[0]), 
+    'ID_2011':depths_2011.index.get_level_values(0), 
+    'ID_2016':depths_2016.index.get_level_values(0), 
+    'Year':depths_2011.index.get_level_values(1), 
+    'Lat':depths_2011['Lat'].values, 
+    'Lon':depths_2011['Lon'].values, 
+    'elev_2011':depths_2011['elev'].values, 
+    'elev_2016':depths_2016['elev'].values, 
+    'depth_2011':depths_2011['IHR_depth'].values, 
+    'depth_2016':depths_2016['IHR_depth'].values})
+df_depths['depth_res'] = (
+    df_depths['depth_2016'] - df_depths['depth_2011'])
+
+# %% 
+
+hv.Distribution(df_depths, kdims=['depth_res'], vdims=['Year']).groupby('Year')
+
 
 
 
