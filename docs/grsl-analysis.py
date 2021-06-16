@@ -144,14 +144,14 @@ chunk_centers = gpd.GeoDataFrame({
 plt_accum2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, size=10, 
+        cmap='viridis', colorbar=True, size=12, 
         # bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
 plt_accum2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, size=10,
+        cmap='viridis', colorbar=True, size=12,
         # bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
@@ -173,8 +173,8 @@ plt_loc2016 = gv.Points(
 plt_locCOMB = gv.Points(
     gdf_PAIPR, crs=ANT_proj, 
     vdims=['accum_2011','accum_2016']).opts(
-        projection=ANT_proj, color='orange', 
-        size=18, 
+        projection=ANT_proj, color='cyan', 
+        size=24, 
         # bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
@@ -185,7 +185,7 @@ plt_manPTS = gv.Points(
     chunk_centers, crs=ANT_proj, 
     vdims='Site').opts(
         projection=ANT_proj, color='black', 
-        size=30, marker='square')
+        size=32, marker='square')
 
 plt_labels = hv.Labels(
     {'x': chunk_centers.geometry.x.values, 
@@ -222,7 +222,7 @@ elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
 
 # Generate contour plot
 cont_plt = hv.operation.contours(elev_plt, levels=15).opts(
-    cmap='cividis', show_legend=False, 
+    cmap='magma', show_legend=False, 
     colorbar=True, line_width=2)
 
 # Generate elevation hillshade
@@ -261,11 +261,13 @@ plt_accum = gv.Points(
 
 plt_res = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
-        projection=ANT_proj, color='accum_res', size=10,
+        projection=ANT_proj, color='accum_res', size=12,
         # bgcolor='silver', 
-        colorbar=True, cmap='coolwarm_r', 
+        colorbar=True, 
+        # cmap='coolwarm_r', 
+        cmap='seismic',
         symmetric=True, tools=['hover'], 
-        width=600, height=600, fontsize=1.75)
+        width=600, height=600)
 
 
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
@@ -948,7 +950,7 @@ def vario(
     points_gdf, lag_size, 
     d_metric='euclidean', vars='all', 
     stationarize=False, scale=True):
-    """A function to calculate the semivariogram for values associated with a geoDataFrame of points.
+    """A function to calculate the experimental variogram for values associated with a geoDataFrame of points.
 
     Args:
         points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
@@ -1765,7 +1767,7 @@ data_map = (
     * plt_locCOMB * plt_manPTS 
     * (plt_accum2011 * plt_accum2016) 
     * plt_labels.opts(text_font_size='36pt')
-    ).opts(fontscale=2.5, width=1200, height=1200)
+    ).opts(fontscale=3, width=1200, height=1200)
 
 res_map = (
     # elev_plt.opts(colorbar=False) 
@@ -1775,7 +1777,7 @@ res_map = (
     * plt_labels.opts(text_font_size='36pt')
     ).opts(
         ylim=(gdf_bounds['y_range'][0], -2.25E5), 
-        fontscale=2.5, width=1200, height=715)
+        fontscale=3, width=1200, height=715)
 
 # %%
 
