@@ -78,7 +78,7 @@ def format_PAIPR(data_df, start_yr=None, end_yr=None):
         # New df (in long format) with accum data assigned
         data_long = (
             data_df.filter(['trace_ID', 'collect_time', 
-            'QC_flag', 'Lat', 'Lon', 
+            'QC_flag', 'QC_med', 'Lat', 'Lon', 
             'elev', 'Year']).assign(
                 accum=data_df['accum_mu'], 
                 std=data_df['accum_std']).reset_index(drop=True))
