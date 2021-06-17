@@ -102,6 +102,8 @@ gdf_PAIPR = gpd.GeoDataFrame(
     {'ID_2011': dist_overlap.index.values, 
     'ID_2016': dist_overlap['trace_ID'].values, 
     'trace_dist': dist_overlap['distance'].values,
+    'QC_2011': gdf_2011.loc[dist_overlap.index,'QC_med'].values,
+    'QC_2016': dist_overlap['QC_med'].values, 
     'accum_2011': 
         accum_2011.mean(axis=0).values, 
     'accum_2016': 
@@ -139,54 +141,57 @@ chunk_centers = gpd.GeoDataFrame({
 #             -4.639E5, -4.640E5, -4.668E5]), 
 #     crs="EPSG:3031")
 
-#%% Data location map
+#%% Data map components
 
+# Accumulation plots for both flights
 plt_accum2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
         cmap='viridis', colorbar=True, size=12, 
-        # bgcolor='silver', 
+        bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
 plt_accum2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
         cmap='viridis', colorbar=True, size=12,
-        # bgcolor='silver', 
+        bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
 
+# Location plots for flights (and combined overlap)
 plt_loc2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum','std']).opts(
         projection=ANT_proj, color='blue', alpha=0.9, 
         size=5, 
-        # bgcolor='silver', 
+        bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
 plt_loc2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum','std']).opts(
         projection=ANT_proj, color='red', alpha=0.9, 
         size=5, 
-        # bgcolor='silver', 
+        bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
 plt_locCOMB = gv.Points(
     gdf_PAIPR, crs=ANT_proj, 
     vdims=['accum_2011','accum_2016']).opts(
         projection=ANT_proj, color='cyan', 
-        size=24, 
-        # bgcolor='silver', 
+        size=24, alpha=0.5,
+        bgcolor='silver', 
         tools=['hover'], 
         width=700, height=700)
 
 
-
+# Locations of manual tracing sites
 plt_manPTS = gv.Points(
     chunk_centers, crs=ANT_proj, 
     vdims='Site').opts(
         projection=ANT_proj, color='black', 
         size=32, marker='square')
 
+# Labels for manual tracing locations
 plt_labels = hv.Labels(
     {'x': chunk_centers.geometry.x.values, 
     'y': chunk_centers.geometry.y.values, 
@@ -194,6 +199,16 @@ plt_labels = hv.Labels(
     ['x','y'], 'text').opts(
         yoffset=20000, text_color='black', 
         text_font_size='28pt')
+
+# Location of example echograms in Fig 2
+echo_pt = gpd.GeoDataFrame(
+    gpd.GeoSeries(Point(-113.250, -79.215), crs='epsg:4326'))
+echo_pt = echo_pt.rename(
+    columns={0:'geometry'}).set_geometry('geometry')
+echo_pt.to_crs(epsg=3031, inplace=True)
+plt_echo = gv.Points(echo_pt, crs=ANT_proj).opts(
+    projection=ANT_proj, 
+    color='white', marker='star', size=20)
 
 # %%
 
@@ -223,7 +238,7 @@ elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
 # Generate contour plot
 cont_plt = hv.operation.contours(elev_plt, levels=15).opts(
     cmap='magma', show_legend=False, 
-    colorbar=True, line_width=2)
+    colorbar=True, line_width=3)
 
 # Generate elevation hillshade
 xr_HS = hillshade(xr_DEM)
@@ -262,16 +277,22 @@ plt_accum = gv.Points(
 plt_res = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
         projection=ANT_proj, color='accum_res', size=12,
-        # bgcolor='silver', 
+        bgcolor='silver', 
         colorbar=True, 
-        # cmap='coolwarm_r', 
-        cmap='seismic',
+        # cmap='seismic_r', 
+        cmap='BrBG',
         symmetric=True, tools=['hover'], 
         width=600, height=600)
 
 
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
 # plt_res
+
+# %% Bias trend with QC rating
+
+fig, ax = plt.subplots()
+ax.scatter(x=abs(gdf_PAIPR['QC_2016']-gdf_PAIPR['QC_2011']), y=abs(gdf_PAIPR['accum_res']), color='red', alpha=0.25)
+ax.hlines(y=0, xmin=0, xmax=0.08, color='black')
 
 # %%
 
@@ -1221,28 +1242,37 @@ gdf_flight2016 = gpd.read_file(
 # %% Add intersecting flight parameter data to PAIPR gdf
 
 # Find nearest neighbors between gdf_PAIPR and gdf_flight2011
-dist_2011 = nearest_neighbor(
+dist_2011 = pd.DataFrame(nearest_neighbor(
     gdf_PAIPR, gdf_flight2011, 
     return_dist=True).drop(
-        columns=['time', 'geometry']).add_suffix('_2011')
-gdf_PAIPR = gdf_PAIPR.join(dist_2011)
+        columns=['time', 'geometry'])).add_suffix('_res')
+dist_2011['plane_elev'] = dist_2011['altitude_res']-gdf_PAIPR['elev']
+# dist_2011 = nearest_neighbor(
+#     gdf_PAIPR, gdf_flight2011, 
+#     return_dist=True).drop(
+#         columns=['time', 'geometry']).add_suffix('_2011')
+# gdf_PAIPR = gdf_PAIPR.join(dist_2011)
 
 # Find nearest neighbors between gdf_PAIPR and gdf_flight2016
-dist_2016 = nearest_neighbor(
+dist_2016 = pd.DataFrame(nearest_neighbor(
     gdf_PAIPR, gdf_flight2016, 
     return_dist=True).drop(
-        columns=['time', 'geometry']).add_suffix('_2016')
+        columns=['time', 'geometry'])).add_suffix('_res')
+dist_2016['plane_elev'] = dist_2016['altitude_res']-gdf_PAIPR['elev']
+# dist_2016 = nearest_neighbor(
+#     gdf_PAIPR, gdf_flight2016, 
+#     return_dist=True).drop(
+#         columns=['time', 'geometry']).add_suffix('_2016')
+# gdf_PAIPR = gdf_PAIPR.join(dist_2016)
 
-gdf_PAIPR = gdf_PAIPR.join(dist_2016)
-
-# Add columns for plane distance above surface
-gdf_PAIPR['plane_elev2011'] = (
-    gdf_PAIPR['altitude_2011'] - gdf_PAIPR['elev'])
-gdf_PAIPR['plane_elev2016'] = (
-    gdf_PAIPR['altitude_2016'] - gdf_PAIPR['elev'])
+plane_res = (dist_2016 - dist_2011).drop(
+    columns=['altitude_res', 'distance_res'])
 
 # Add column for absolute value of accum res
 gdf_PAIPR['res_abs'] = np.abs(gdf_PAIPR['accum_res'])
+
+# Join data to gdf_PAIPR
+gdf_PAIPR = gdf_PAIPR.join(plane_res)
 
 # %% Paired correlation plots for variables
 
@@ -1261,18 +1291,18 @@ sns.pairplot(
     y_vars=['accum_res', 'res_abs', 'accum_mu'], 
     diag_kind='kde', dropna=True)
 
-sns.pairplot(
-    data=gdf_PAIPR, 
-    x_vars=['accum_res', 'res_abs', 
-        'plane_elev2011', 'heading_2011', 'pitch_2011', 'roll_2011'],
-        y_vars=['accum_res', 'res_abs'], 
-    diag_kind='kde', dropna=True)
+# sns.pairplot(
+#     data=gdf_PAIPR, 
+#     x_vars=['accum_res', 'res_abs', 
+#         'plane_elev2011', 'heading_2011', 'pitch_2011', 'roll_2011'],
+#         y_vars=['accum_res', 'res_abs'], 
+#     diag_kind='kde', dropna=True)
 
 sns.pairplot(
     data=gdf_PAIPR, 
     x_vars=[
         'accum_res', 'res_abs', 
-        'plane_elev2016', 'heading_2016', 'pitch_2016', 'roll_2016'], 
+        'plane_elev', 'heading_res', 'pitch_res', 'roll_res'], 
     y_vars=['accum_res', 'res_abs'], 
     diag_kind='kde', dropna=True)
 
@@ -1668,8 +1698,8 @@ def panels_121(
         # Combine 1:1 line and scatter plot and add to plot list
         one2one_plt = (one2one_line * scatt_yr).opts(
             width=size, height=size, 
-            fontscale=3,
-            # fontsize={'xticks':30, 'yticks':30}, 
+            # fontscale=3,
+            fontsize={'ticks':20, 'xticks':30, 'yticks':30}, 
             xrotation=90, 
             xticks=4, yticks=4)
         if i==len(datum)-1:
@@ -1683,7 +1713,8 @@ def panels_121(
             / data[[x_var, y_var]].mean(axis=1))
         kde_plot = hv.Distribution(
             kde_data, label=kde_labels[i]).opts(
-            filled=False, line_color=kde_colors[i])
+            filled=False, line_color=kde_colors[i], 
+            line_width=5)
         kde_plots.append(kde_plot)
 
     # Generate and decorate combined density subplot
@@ -1691,15 +1722,14 @@ def panels_121(
         kde_plots[0] * kde_plots[1] 
         * kde_plots[2] * kde_plots[3]).opts(
             xaxis=None, yaxis=None, 
-            width=size, height=size, show_grid=True, 
-            # fontscale=font_scaler
+            width=size, height=size, show_grid=True
         )
     
     # Specific formatting based on subplot position
     if TOP:
         fig_kde = fig_kde.opts(
             xaxis='top', xlabel='% Bias', xrotation=90, 
-            fontsize={'legend':25, 'xticks':16, 'xlabel':18})
+            fontsize={'legend':25, 'xticks':18, 'xlabel':22})
     elif BOTTOM:
         fig_kde = fig_kde.opts(
             xaxis='bottom', xlabel='% Bias', xrotation=90,
@@ -1771,8 +1801,8 @@ data_map = (
 
 res_map = (
     # elev_plt.opts(colorbar=False) 
-    hill_plt
-    * cont_plt.opts(colorbar=False)
+    hill_plt * 
+    cont_plt.opts(colorbar=False)
     * plt_manPTS* plt_res 
     * plt_labels.opts(text_font_size='36pt')
     ).opts(
@@ -1807,9 +1837,76 @@ hv.save(fig_supp2, ROOT_DIR.joinpath(
 # %%
 
 cont_bar = cont_plt.opts(
-    colorbar=True, fontscale=2.5, width=1200, height=1200)
+    colorbar=True, fontscale=3, width=1200, height=1200)
 hv.save(cont_bar, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/cont_bar.png'))
+
+# %% Example echogram figures
+
+echo2011 = xr.load_dataset(ROOT_DIR.joinpath(
+    'data/oib-examples/IRSNO1B_20111109_02_255.nc'))[
+    ['amplitude', 'lat', 'lon', 'Surface', 'fasttime']].transpose()
+
+# Calculate distance along time dimension and add to ds
+tmp = gpd.GeoDataFrame(
+    geometry=gpd.points_from_xy(
+        echo2011['lon'].data, echo2011['lat'].data, 
+        crs='epsg:4326'))
+tmp.to_crs(epsg=3031, inplace=True)
+echo2011['distance'] = (
+    ('time'), 
+    np.flip(path_dist(
+        np.array([tmp.geometry.x, tmp.geometry.y]).T)))
+
+# Set new coordinates
+echo2011 = echo2011.set_coords(['fasttime', 'distance'])
+
+# echo2011 = echo2011.where(
+#     (echo2011.fasttime<=np.timedelta64(3070, 'ns')) 
+#     & (echo2011.fasttime>=np.timedelta64(2900, 'ns')), 
+#     drop=True)
+
+# echo_hv = hv.Dataset(
+#     (echo2011['distance'].data, 
+#     echo2011['fasttime'].data.astype('float'), 
+#     echo2011['amplitude'].data), 
+#     ['distance', 'fasttime'], 'amplitude')
+
+# hv.Image(echo_hv).opts(
+#     invert_yaxis=True, cmap='bone', width=900, height=600)
+
+
+# %%
+
+amp_data = echo2011['amplitude'].data
+time_delay = pd.DataFrame({'fasttime':echo2011['fasttime'].data})
+surf = echo2011['Surface'].data
+
+v_depth = 1000
+clip_data = np.empty((v_depth, amp_data.shape[1]))
+time_data = np.empty((v_depth, amp_data.shape[1]), dtype='<m8[ns]')
+v_offset = np.timedelta64(75, 'ns')
+for i in range(amp_data.shape[1]):
+    col = amp_data[:,i]
+    start_idx = time_delay[
+        time_delay['fasttime'].gt((surf[i]-v_offset))].index[0]
+    time_data[:,i] = time_delay.loc[
+        start_idx:start_idx+v_depth-1, 'fasttime'].values
+    clip_data[:,i] = col[start_idx:start_idx+v_depth]
+
+depth = np.linspace(-0.5, 6, num=v_depth)
+
+
+
+
+echo_hv = hv.Dataset(
+    (echo2011['distance'].data, 
+    depth, 
+    clip_data), 
+    ['distance', 'depth'], 'amplitude')
+
+hv.Image(echo_hv).opts(
+    invert_yaxis=True, cmap='bone', width=900, height=600)
 
 
 # %%[markdown]
