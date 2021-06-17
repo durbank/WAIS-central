@@ -245,6 +245,30 @@ xr_HS = hillshade(xr_DEM)
 hill_plt = hv.Image(xr_HS.values, bounds=tpl_bnds).opts(
         alpha=0.25, cmap='gray', colorbar=False)
 
+# %% Get ice velocities of trace locations
+
+xr_vice = xr.open_dataset(ROOT_DIR.joinpath(
+    'data/ice-velocities/antarctica_ice_velocity_450m_v2.nc'))
+xr_clip = xr_vice.sel(
+    x=slice(
+        gdf_PAIPR.total_bounds[0], 
+        gdf_PAIPR.total_bounds[2]), 
+    y=slice(
+        gdf_PAIPR.total_bounds[3], 
+        gdf_PAIPR.total_bounds[1]))
+xr_pts = extract_at_pts(xr_clip, gdf_PAIPR, return_dist=True)
+vice_pts = gpd.GeoDataFrame(
+    data=xr_pts[['VX', 'VY']], crs='epsg:3031', 
+    geometry=xr_pts.geometry)
+vice_pts['Vxy'] = np.sqrt(
+    vice_pts['VX']**2 + vice_pts['VY']**2)
+
+gv.Points(vice_pts, crs=ANT_proj, 
+vdims=['Vxy', 'VX', 'VY']).opts(
+    projection=ANT_proj, color='Vxy', cmap='viridis', 
+    size=10, colorbar=True, logz=True,
+    width=800, height=800, tools=['hover'])
+
 # %% PAIPR residuals
 
 # Calculate residuals (as % bias of mean accumulation)
