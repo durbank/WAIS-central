@@ -6,9 +6,18 @@ General response to editor and reviewers discussing the main thrusts of the edit
 
 In addition to these general changes, we also include specific responses to each of the comments provided by the reviewers, along with the locations in the updated manuscript of the implemented changes.
 
+We include two copies of the manuscript in this submission.
+The first is a direct update from the initial submission.
+The second highlights the specific changes we have made since the original submission.
+Line numbers in the following comments reference the location of edits in the second, change-highlighted document.
+
 Although we feel all the suggested edits are valuable, we believe the sum total of all these edits exceeds what can adequately be covered in such a short and targeted study.
 We have therefore incorporated all the suggestions we reasonably can while judiciously deferring less applicable suggestions to future studies.
 For each instance where we elected not to incorporate the suggested edit, we have detailed our reasoning and thoughts as to why such suggestions, while objectively meritorious, are best pursued in future work.
+
+The edits incorporated into the manuscript also necessitated the moving of the discussion of updates to the PAIPR methodology to the supplement.
+We do not, however, feel this change materially impacts the readability of the manuscript or causes undue jumps in logic when trying to follow the methods, results and their implications.
+We have made edits throughout the manuscript to ensure no loss in...
 
 ## Reviewer 1
 
@@ -18,49 +27,54 @@ We agree with the reviewer that it would be useful to expand the analysis to a w
 We, however, feel such an investigation is outside the intended scope of the current study.
 We have limited our analysis to regions where we have higher confidence in our depth-density modeling results (due to adequate *in-situ* density record coverage) and where repeat OIB flights with a number of years of separation between collection time exist.
 Although research is ongoing to extend the density model used to wider regions of Antarctica, it is not possible to complete and implement this work in the short time frame required for revisions.
-**We have, however, added additional text to the manuscript more explicitly stating the limits of this study, with hope to further expand it in the future (Lines ).**
+**We have, however, added additional text to the manuscript more explicitly stating the limits of this study, with hopes to further expand it in the future (Lines ).**
 
 > There should be some discussion and analysis of the effect of layer-echo signal to noise ratio in the precision of the layer measurements and the resulting accumulation estimates.
 
-We were uncertain of the precise issue raised by this comment.
-We understood it to mean...
-The original paper outlining the PAIPR method discusses these concerns in greater detail.
-*Discussion of uncertainty incorporation in PAIPR.*
-**We have included additional discussion in the manuscript to better highlight these points, and hope such discussion will satisfactorily resolve this concern.**
+SNR of echo layers are relevant to this research, so we are glad the reviewer raised this point.
+We have added a discussion of the impact of radar attenuation on SNR and its effect on layer selection (Lines ).
+We also briefly discuss how these impacts are limited in our study (Lines ).
 
 ## Reviewer 2
 
-> The 2011 and 2016 transects were actually flown with slightly different radar parameters. 2011 had a bandwidth of 4 GHz (2-6 GHz sweep) and 2016 has a bandwidth of 6 GHz (2-8 GHz sweep). (If you’re using the CReSIS MATLAB files from their ftp site, you can check these parameters in the param_get_heights.radar.wfs variable that comes with the data.) This isn’t a huge difference in range resolution (~4 cm vs ~2.7 cm in snow), but I would expect some impact on the layer tracking results.This seems worth mentioning, both as a potential source of both the error and bias and because your results now actually suggest that the accumulation estimates are fairly robust to these kinds of small variations in the bandwidth/range resolution.
+> The 2011 and 2016 transects were actually flown with slightly different radar parameters. 2011 had a bandwidth of 4 GHz (2-6 GHz sweep) and 2016 has a bandwidth of 6 GHz (2-8 GHz sweep). (If you’re using the CReSIS MATLAB files from their ftp site, you can check these parameters in the param_get_heights.radar.wfs variable that comes with the data.) This isn’t a huge difference in range resolution (~4 cm vs ~2.7 cm in snow), but I would expect some impact on the layer tracking results. This seems worth mentioning, both as a potential source of both the error and bias and because your results now actually suggest that the accumulation estimates are fairly robust to these kinds of small variations in the bandwidth/range resolution.
 
-We edited this to explicitly note this difference in bandwidth between the two flights and its impact on range resolution (Lines ).
-**We also now mention this when discussing potential sources of error in our results (Lines ) and indicate that our results suggest such variations have minimal impact on the reproducibility of results (Lines ).**
+We appreciate the reviewer bringing up this point and its significance to our results.
+We edited the manuscript to explicitly note this difference in bandwidth between the two flights and its impact on range resolution (Lines ).
+**We also now mention this difference when discussing potential sources of error in our results (Lines ) and indicate that our results suggest such variations have minimal impact on the reproducibility of SMB estimates from radar (Lines ).**
 
 > How did you choose the $S_Q = 0.50$ cutoff and the 10% quality cutoff for radargrams? Are those values you would expect to be reasonable for any data sets, or is there a logic to their choice that would be a useful for a reader to understand if they were interested in using these methods themself?
 
-$S_Q = 0.50$ represents...
-Although somewhat arbitrary, the 10% cutoff was chosen to ensure more suspect data was flagged as questionable.
-Such results are still processed and generated, but were removed from the later analyses.
-Manual inspections/corrections are still possible with these flagged results.
-The lack of any trend in bias compared to image quality score support the use of these values for our analysis and can be viewed as lower bounds on the subset of data of adequate quality.
+This comment raises a good point regarding the selection of these thresholds.
+We have added additional discussion on the $S_Q$ parameter to better give intuition to its physical meaning (Lines ).
+We further include a brief discussion regarding the choice of parameter values, the rationale behind that choice, we indicate that a small amount of the overall dataset (~3%) were removed through this, and present some evidence suggesting our choice of parameter values is warranted (Lines ).
 
 > It was not totally clear to me why there is uncertainty/variability in the value of the logistic function parameters and how the ranges are chosen for the Monte Carlo implementation. If this can be clarified in a sentence or two, that  would be  nice  for readers  like  myself who are  not  fully familiar with the PAIPR method.
 
-Blah blah blah.
+**Blah blah blah.**
 
 > Reference of the in-situ accumulation estimates that are used for the bias distributions? It would be nice to have a quick sentence explaining where that data comes from and a pointer to any papers on it.
 
 We believe poor wording on our part led to some confusion regarding this point, as more than one reviewer mentioned it.
-We do not use other methods to compare to radar results (e.g. ice cores, climate model outputs, etc.) but instead focus exclusively on 
+We do not use other methods to compare to radar results (e.g. ice cores, climate model outputs, etc.) but instead focus exclusively on the biases and errors between radar results from different methods and flights.
+The target of this research is not to determine whether radar-derived accumulation is accurate compared to other independent methods, but rather whether radar-derived estimates are self-consistent over time.
+We therefore do not perform direct comparisons between radar results and independent methods (e.g. firn cores, RCM outputs, etc.).
+
+We have modified language throughout the manuscript to make this point more clear.
+We have specifically removed all references to *in-situ data* throughout the manuscript to avoid additional confusion.
 
 > Is the mean in-situ accumulation rate one value over the entire study area?
 
-Blah blah blah.
+This mean value refers to the location-specific mean accumulation across all four methods for a given year.
+It therefore is not a single consistent value for the whole region but instead varies by location.
+We elected to use a spatially-varying mean to scale our biases due to the large gradient in accumulation rates across the region (varying by a factor of ~3).
+We have removed the term *in-situ* and replaced it with wording that more clearly articulates this definition (Lines ).
 
 > I find the spatial correlation in bias shown in Fig. 3 very interesting and I think it’s quite an important result that suggests that mean error from sparse crossovers is not a robust way to quantify uncertainty in these types of radar measurements. I am curious whether you have looked at the spatial correlation of this bias pattern with either radar system parameters or physical conditions on the ice sheet beyond the accumulation  rate.  For  example,  I  could  imagine  that  variations  in  signal-to-noise/signal-to-clutter ratio/image quality rating, aircraft roll, or surface slope/surface roughness/topographic variability could play a role in the stability of the estimates. If so, these could be useful insights for future users of these methods when making some initial assessment of their study region and the available data.
 
 We appreciate this suggest and agree some discussion of these correlations would be beneficial.
 Although a full investigation of these relationships is beyond the scope of this short paper, we have included additional language briefly discussing this and our key findings regarding these connections (Lines ).
-In brief, we find no obvious correlations between the strength of the bias and surface slope, surface aspect, plane altitude above the ice sheet surface, aircraft pitch, or aircraft roll.
+We find no obvious correlations between the strength of the bias and surface slope, surface aspect, plane altitude above the ice sheet surface, aircraft pitch, or aircraft roll.
 We see a positive correlation between surface elevation and the bias magnitude but believe this is an expression of lower accumulation rates at higher elevations that increases the error associated with SMB estimates (and therefore increases the potential for larger biases).
 
 > Consider briefly mentioning surface velocities for this region somewhere in the paper since horizontal advection might contribute to observed uncertainty in some of the faster flowing regions.  Although it doesn’t look off-hand like there is a correlation between ice velocity and bias in the study area, which is great.
@@ -87,7 +101,7 @@ We have further incorporated additional modifications to the figure (addition of
 
 > Fig. S2 –I assume  that  the dashed lines show some form of uncertainty bounds? Is this $\pm1 \sigma$, 95% confidence intervals, or something else? Please clarify in the caption.
 
-We have addressed with oversight and explicit state in the figure caption that these lines represent $\pm1 \sigma$ errors.
+We have addressed with oversight and explicitly state in the figure caption that these lines represent $\pm1 \sigma$ errors.
 
 ## Reviewer 3
 
@@ -99,8 +113,10 @@ We have addressed with oversight and explicit state in the figure caption that t
 
 Although we agree that comparisons to climate model outputs are valuable comparisons, they do not fit within the main focus and direction for this article.
 This paper focuses on directly comparing radar results from 2011 and 2016, without attempting to assess whether the results are accurately representing annual accumulation rates (other studies focus more specifically on that question---Medley, Lewis, Keeler, etc.).
+The target of this research is not to determine whether radar-derived accumulation is accurate compared to other independent methods, but rather whether radar-derived estimates are self-consistent over time.
+We therefore do not perform direct comparisons between radar results and independent methods (e.g. firn cores, RCM outputs, etc.).
 We instead investigate whether estimates derived from radar remain consistent and repeatable over a 5-year period, with the main goal assessing the suitability of comparing/combining accumulation estimates from differing radar collection times.
-Additionally, the more coarse spatial footprint associated with climate modeling outputs would results in ambiguity in whether the differences with radar-derived estimates result from simple spatial variability in accumulation rates or from some limitation/inaccuracy in the radar-derived results.
+Additionally, the more coarse spatial footprint associated with climate modeling outputs (10's of km vs ~200 m) specifically would result in ambiguity in whether the differences with radar-derived estimates result from simple spatial variability in accumulation rates or from some limitation/inaccuracy in the radar-derived results.
 
 **We have edited the manuscript so that we refer less explicitly to climate modeling (Lines ).**
 
@@ -157,14 +173,14 @@ We have explicitly stated we are referring to time scales of a few years.
 We include additional wording to better clarify the distinction between our work and prior studies (Lines ).
 We specifically highlight the differences between the crossover analyses performed in Lewis et al. (2017) and Koenig et al. (2016), and why our approach better targets this question of repeatability with disparate collection times specifically.
 
-These crossover studies show internal consistency with increasing depth (temporal stability in the sense of repeatable reconstructions across the full time series of the record) but do not assess the effect of temporal stability in regards to time passing between data collection (i.e. they do not distinguish crossovers for the same flight, flights from the same year, flights spaced multiple years apart in time, etc.).
+**These crossover studies show internal consistency with increasing depth (temporal stability in the sense of repeatable reconstructions across the full time series of the record) but do not assess the effect of temporal stability in regards to time passing between data collection (i.e. they do not distinguish crossovers for the same flight, flights from the same year, flights spaced multiple years apart in time, etc.).
 Koenig et al. (2016) includes additional snow deposition between flights as a potential source of error, but does not investigate the magnitude of this effect on estimate error or how the error changes as time between flights increases.
 Lewis et al. (2017) similarly make no distinction in their crossover analysis for the timing of radar collection but are instead focused only on the spatial overlap between flights.
-Additionally, Lewis et al. (2017) use flights only 2013--2014 OIB flights, limiting the potential effects of temporal instability that is the focus of our manuscript.
+Additionally, Lewis et al. (2017) use flights only 2013--2014 OIB flights, limiting the potential effects of temporal instability that is the focus of our manuscript.**
 
 > “Most of these studies also focus on multi-decadal mean accumulation rates...” – can’t completely ignore Koenig’s snow radar work, which focused on single year accumulation rates from Snow Radar in Greenland. This manuscript is analyzing 1990-2010 accumulation rates, which is “multi-decadal mean accumulation rates.” This sentence seems to lead the reader to a different conclusion than where this manuscript is heading.
 
-We have edited this section to increase clarity, and have explicitly distinguished Koenig et al. (2016) as also focusing on single year accumulation rates while highlighting again the difference in and significance of our methodology.
+We have edited this section to increase clarity, and have explicitly distinguished Koenig et al. (2016) as also focusing on single year accumulation rates while highlighting again the difference in and significance of our methodological focus (Lines ).
 
 > “regardless of collection year” is a bit of a misnomer. You can’t trace annually resolved layers from 100+ years ago with the Snow Radar. So maybe “in recent decades” or similar
 
@@ -180,10 +196,7 @@ We have changed this to "Snow radar" to more clearly convey the unit in question
 
 > “except we apply the model proposed in [20]...” Could you fit one sentence in this manuscript briefly describing that method? The depth-density relationship is critical for the rest of this analysis, so I feel it’s important to include
 
-We added additional sentences to describe this method and the specific advantages/rationale for using it (Lines ) as follows:
-
-This density model uses a positive-valued Bayesian semi-parametric model over space and depth below the ice sheet, informed by 57 \emph{in-situ} firn/ice cores.
-There are several advantages afforded by this method, most importantly its ability to leverage space-depth autocorrelation to interpolate the shape-constrained depth-density profiles to new locations with relatively few model assumptions. Moreover, because we fit the model in a Bayesian framework, our method provides rigorous uncertainty quantification of the depth-density profiles at arbitrary sites to propagate forward into uncertainties of final SMB estimates (see [] for further details).
+We added additional sentences to describe this method and the specific advantages/rationale for using it (Lines ).
 
 > What does “expert manual tracing” entail? One author tracing the lines once? Or multiple authors? Or multiple rounds of tracing? Etc.
 
@@ -195,14 +208,14 @@ We have added the precise range in accumulation rates to this section of the tex
 
 > “The error for the PAIPR method incorporates” implies that the “expert manual tracing” has zero error, when there certainly is some uncertainty
 
-We have added clarifying language discussing that the manual method indeed entails additional uncertainty, but that we do not attempt to quantify it due to the subjective nature of the method.
+We have added clarifying language discussing that the manual method indeed entails additional uncertainty, but that we do not attempt to quantify it due to the subjective nature of the method (Lines ).
 Even using repeat iterations of manual tracing (either by the same individual or multiple individuals) would reflect psychological and physiological influences as much or more than the true error associated with manual tracing methods.
-We instead use this to highlight one of the key advantages of an automated method like PAIPR in that it allows for more rigorous quantification of this uncertainty.
+We instead use this to highlight one of the key advantages of an automated method like PAIPR in that it allows for more rigorous quantification of this uncertainty (Lines ).
 
 > “and 1 (most suspect)” is not a proper scientific term
 
 We have removed the offending phrase (Line ).
-**We have also expanded our discussion of the image quality scoring metric to clarify what these values represent.**
+We have also expanded our discussion of the image quality scoring metric to clarify what these values represent (Lines ).
 
 > IRH is defined after Equation 1, but also used in the paragraph before
 
@@ -210,7 +223,7 @@ We have now properly defined this acronym prior to its first use (Line ).
 
 > What values of S_Q do you see throughout your data? One sentence describing the quality scores would be helpful
 
-**We have expanded our discussion of the image quality scoring metric to clarify what these values represent, and the variability in these values.**
+We have expanded our discussion of the image quality scoring metric to clarify what these values represent, and the choice parameter values $S_Q$ and the cutoff percentage threshold (Lines ).
 
 > Can you give a few examples of “regions where IRHs are discontinuous?” How much of Antarctica (or the region you studied) would fall into that category? Does SEAT2010-4 have a quality control flag?
 
@@ -228,7 +241,12 @@ We leave this to the typesetting team to resolve in the final version.
 
 > What are you considering “correct” when computing “the differences, biases, and errors?” Could be a good place to compare with RCMs or field measurements (if they exist).
 
-**Blah.**
+We believe poor wording on our part led to some confusion regarding this point, as more than one reviewer mentioned it.
+We do not use other methods to compare to radar results (e.g. ice cores, climate model outputs, etc.) but instead focus exclusively on the biases and errors between radar results from different methods and flights.
+The target of this research is not to determine whether radar-derived accumulation is accurate compared to other independent methods, but rather whether radar-derived estimates are self-consistent over time.
+We therefore do not perform direct comparisons between radar results and independent methods (e.g. firn cores, RCM outputs, etc.).
+We instead use the mean accumulation value at a given location and year to determine percent differences between different methods and flight data.
+**We have modified wording referencing this throughout the manuscript to hopefully make this distinction more clear (Lines ).**
 
 > “2016 estimates on average are 2.98...” – sentence starts with a number. Estimates of what? 
 
@@ -256,15 +274,17 @@ We incorporated the suggested edit (Line ).
 
 > Does SEAT2010-4 show any decrease in accumulation between 1990-2016, or is the difference entirely within the radar calculations?
 
-Blah
+**Blah**
 
 > Can you briefly discuss “the limitations on the repeatability of radar imaging in these regions”
 
-Blah
+**Blah**
 
 > “indicate that the automated PAIPR method is able to accurately replicate the manual approach” – can you quantify the difference in IRH depth between the two methods, not just the accumulation. Might be simple to add a column to one of the tables, since there is also uncertainty in density
 
-Blah
+**Blah**
+Although we believe this could be useful information, we fear its inclusion could lead to more misdirection than context.
+Due to the probabilistic nature of PAIPR, the depths assigned to a given year incorporate a greater degree of uncertainty...
 
 > “when data collection is separated by a number of years” should be 5 years, since you can’t speculate if this would work with a longer separation
 
