@@ -175,7 +175,7 @@ plt_loc2016 = gv.Points(
         tools=['hover'], 
         width=700, height=700)
 plt_locCOMB = gv.Points(
-    gdf_PAIPR, crs=ANT_proj, 
+    gdf_PAIPR.iloc[0::25], crs=ANT_proj, 
     vdims=['accum_2011','accum_2016']).opts(
         projection=ANT_proj, color='cyan', 
         size=24, alpha=0.5,
@@ -200,7 +200,7 @@ plt_labels = hv.Labels(
         yoffset=20000, text_color='black', 
         text_font_size='28pt')
 
-# Location of example echograms in Fig 2
+# Location of example echograms in Fig S1
 echo_pt = gpd.GeoDataFrame(
     gpd.GeoSeries(Point(-113.250, -79.215), crs='epsg:4326'))
 echo_pt = echo_pt.rename(
@@ -256,7 +256,8 @@ xr_clip = xr_vice.sel(
     y=slice(
         gdf_PAIPR.total_bounds[3], 
         gdf_PAIPR.total_bounds[1]))
-xr_pts = extract_at_pts(xr_clip, gdf_PAIPR, return_dist=True)
+xr_pts = extract_at_pts(
+    xr_clip, gdf_PAIPR.copy(), return_dist=True)
 vice_pts = gpd.GeoDataFrame(
     data=xr_pts[['VX', 'VY']], crs='epsg:3031', 
     geometry=xr_pts.geometry)
@@ -1818,8 +1819,10 @@ data_map = (
     # elev_plt.opts(colorbar=False)
     hill_plt
     * cont_plt.opts(colorbar=False)
-    * plt_locCOMB * plt_manPTS 
+    * plt_locCOMB 
+    * plt_manPTS 
     * (plt_accum2011 * plt_accum2016) 
+    * plt_echo
     * plt_labels.opts(text_font_size='36pt')
     ).opts(fontscale=3, width=1200, height=1200)
 
@@ -1865,11 +1868,13 @@ cont_bar = cont_plt.opts(
 hv.save(cont_bar, ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/cont_bar.png'))
 
-# %% Example echogram figures
+# %% Example 2011 echogram figure
 
-echo2011 = xr.load_dataset(ROOT_DIR.joinpath(
-    'data/oib-examples/IRSNO1B_20111109_02_255.nc'))[
-    ['amplitude', 'lat', 'lon', 'Surface', 'fasttime']].transpose()
+echo2011 = xr.load_dataset(
+    ROOT_DIR.joinpath(
+        'data/oib-examples/IRSNO1B_20111109_02_255.nc'))[
+            ['amplitude', 'lat', 'lon', 
+            'Surface', 'fasttime']].transpose()
 
 # Calculate distance along time dimension and add to ds
 tmp = gpd.GeoDataFrame(
@@ -1885,31 +1890,15 @@ echo2011['distance'] = (
 # Set new coordinates
 echo2011 = echo2011.set_coords(['fasttime', 'distance'])
 
-# echo2011 = echo2011.where(
-#     (echo2011.fasttime<=np.timedelta64(3070, 'ns')) 
-#     & (echo2011.fasttime>=np.timedelta64(2900, 'ns')), 
-#     drop=True)
-
-# echo_hv = hv.Dataset(
-#     (echo2011['distance'].data, 
-#     echo2011['fasttime'].data.astype('float'), 
-#     echo2011['amplitude'].data), 
-#     ['distance', 'fasttime'], 'amplitude')
-
-# hv.Image(echo_hv).opts(
-#     invert_yaxis=True, cmap='bone', width=900, height=600)
-
-
-# %%
-
+# Clip data to same distance above/below the surface
 amp_data = echo2011['amplitude'].data
 time_delay = pd.DataFrame({'fasttime':echo2011['fasttime'].data})
 surf = echo2011['Surface'].data
 
-v_depth = 1000
+v_depth = 1300
 clip_data = np.empty((v_depth, amp_data.shape[1]))
 time_data = np.empty((v_depth, amp_data.shape[1]), dtype='<m8[ns]')
-v_offset = np.timedelta64(75, 'ns')
+v_offset = np.timedelta64(12, 'ns')
 for i in range(amp_data.shape[1]):
     col = amp_data[:,i]
     start_idx = time_delay[
@@ -1918,20 +1907,85 @@ for i in range(amp_data.shape[1]):
         start_idx:start_idx+v_depth-1, 'fasttime'].values
     clip_data[:,i] = col[start_idx:start_idx+v_depth]
 
-depth = np.linspace(-0.5, 6, num=v_depth)
+# Generate approximate depth index
+depth = np.linspace(-1, 16, num=v_depth)
 
-
-
-
-echo_hv = hv.Dataset(
+# HV dataset of echogram
+echo2011_hv = hv.Dataset(
     (echo2011['distance'].data, 
     depth, 
-    clip_data), 
+    (clip_data-clip_data.mean())/clip_data.std()), 
     ['distance', 'depth'], 'amplitude')
 
-hv.Image(echo_hv).opts(
-    invert_yaxis=True, cmap='bone', width=900, height=600)
+# Plot 2011 echogram
+echo2011_plt = hv.Image(echo2011_hv).opts(
+    invert_yaxis=True, cmap='bone', 
+    width=1000, height=500, fontscale=2, 
+    xlabel='Distance (m)', ylabel='Depth (m)')
 
+# %% Example 2016 echogram figure
+
+echo2016 = xr.load_dataset(
+    ROOT_DIR.joinpath(
+        'data/oib-examples/IRSNO1B_20161109_02_364.nc'))[
+            ['amplitude', 'lat', 'lon', 
+            'Surface', 'fasttime']].transpose()
+
+# Calculate distance along time dimension and add to ds
+tmp = gpd.GeoDataFrame(
+    geometry=gpd.points_from_xy(
+        echo2016['lon'].data, echo2016['lat'].data, 
+        crs='epsg:4326'))
+tmp.to_crs(epsg=3031, inplace=True)
+echo2016['distance'] = (
+    ('time'), 
+    np.flip(path_dist(
+        np.array([tmp.geometry.x, tmp.geometry.y]).T)))
+
+# Set new coordinates
+echo2016 = echo2016.set_coords(['fasttime', 'distance'])
+
+# Clip data to same distance above/below the surface
+amp_data = echo2016['amplitude'].data
+time_delay = pd.DataFrame({'fasttime':echo2016['fasttime'].data})
+surf = echo2016['Surface'].data
+
+v_depth = 1700
+clip_data = np.empty((v_depth, amp_data.shape[1]))
+time_data = np.empty((v_depth, amp_data.shape[1]), dtype='<m8[ns]')
+v_offset = np.timedelta64(10, 'ns')
+for i in range(amp_data.shape[1]):
+    col = amp_data[:,i]
+    start_idx = time_delay[
+        time_delay['fasttime'].gt((surf[i]-v_offset))].index[0]
+    time_data[:,i] = time_delay.loc[
+        start_idx:start_idx+v_depth-1, 'fasttime'].values
+    clip_data[:,i] = col[start_idx:start_idx+v_depth]
+
+# Generate approximate depth index
+depth = np.linspace(-1, 16, num=v_depth)
+
+# HV dataset of echogram
+echo2016_hv = hv.Dataset(
+    (echo2016['distance'].data, 
+    depth, 
+    (clip_data-clip_data.mean())/clip_data.std()), 
+    ['distance', 'depth'], 'amplitude')
+
+# Plot 2011 echogram
+echo2016_plt = hv.Image(echo2016_hv).opts(
+    invert_yaxis=True, cmap='bone', 
+    width=1000, height=500, fontscale=2, 
+    xlabel='Distance (m)', ylabel='Depth (m)')
+
+# (echo2011_plt + echo2016_plt)
+
+# %%
+
+hv.save(echo2011_plt, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/echo2011.png'))
+hv.save(echo2016_plt, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/echo2016.png'))
 
 # %%[markdown]
 # ## Investigations of depth variability and QC effect
