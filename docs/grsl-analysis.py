@@ -1290,7 +1290,7 @@ dist_2016['plane_elev'] = dist_2016['altitude_res']-gdf_PAIPR['elev']
 #         columns=['time', 'geometry']).add_suffix('_2016')
 # gdf_PAIPR = gdf_PAIPR.join(dist_2016)
 
-plane_res = (dist_2016 - dist_2011).drop(
+plane_res = abs(dist_2016 - dist_2011).drop(
     columns=['altitude_res', 'distance_res'])
 
 # Add column for absolute value of accum res
@@ -1301,35 +1301,60 @@ gdf_PAIPR = gdf_PAIPR.join(plane_res)
 
 # %% Paired correlation plots for variables
 
-# sns.pairplot(
-#     data=gdf_PAIPR, 
-#     vars=[
-#         'accum_res', 'trace_dist', 'elev', 'slope', 'aspect', 'altitude_2011', 'heading_2011', 'pitch_2011', 'roll_2011', 
-#         'altitude_2016', 'heading_2016', 'pitch_2016', 'roll_2016'], 
-#     kind='kde', dropna=True)
+lab_replace = {
+    'res_abs': 'Accum % bias',
+    'trace_dist': 'Trace distance (m)', 
+    'elev': 'Elevation (m)', 
+    'slope': 'Slope', 'aspect':'Aspect (degrees)',
+    'plane_elev':'Altitude bias (m)', 
+    'heading_res':'Heading bias (degrees)', 
+    'pitch_res':'Pitch bias (degrees)', 
+    'roll_res':'Roll bias (degrees)'}
 
-sns.pairplot(
-    data=gdf_PAIPR, 
+pplt1 = sns.pairplot(
+    data=gdf_PAIPR, kind='scatter',
     x_vars=[
-        'accum_res', 'res_abs', 'accum_mu', 
-        'trace_dist', 'elev', 'slope', 'aspect'],
-    y_vars=['accum_res', 'res_abs', 'accum_mu'], 
-    diag_kind='kde', dropna=True)
+        'trace_dist', 'elev', 
+        'slope', 'aspect'], 
+    y_vars=['res_abs'], dropna=True, 
+    plot_kws={
+        # 'line_kws':{'color':'red'}, 
+        # 'scatter_kws': {'alpha': 0.1}}, 
+        'alpha':0.1},
+    height=5)
 
-# sns.pairplot(
-#     data=gdf_PAIPR, 
-#     x_vars=['accum_res', 'res_abs', 
-#         'plane_elev2011', 'heading_2011', 'pitch_2011', 'roll_2011'],
-#         y_vars=['accum_res', 'res_abs'], 
-#     diag_kind='kde', dropna=True)
-
-sns.pairplot(
-    data=gdf_PAIPR, 
+pplt2 = sns.pairplot(
+    data=gdf_PAIPR, kind='scatter', 
     x_vars=[
-        'accum_res', 'res_abs', 
-        'plane_elev', 'heading_res', 'pitch_res', 'roll_res'], 
-    y_vars=['accum_res', 'res_abs'], 
-    diag_kind='kde', dropna=True)
+        'plane_elev', 'heading_res', 
+        'pitch_res', 'roll_res'], 
+    y_vars=['res_abs'], dropna=True, 
+        plot_kws={
+        # 'line_kws':{'color':'red'}, 
+        # 'scatter_kws': {'alpha': 0.1}}, 
+        'alpha':0.1},
+    height=5)
+
+def replace_labs(fig, labs_dict):
+    """Helper function to replace axis labels in seaborn pairplot.
+
+    Args:
+        fig (seaborn.axisgrid.PairGrid): The seaborn pairplot figure to modify
+        labs_dict (dict): Dictionary of labels to replace and what to replace them with.
+    Return (seaborn.axisgrid.PairGrid): The seaborn figure with modified axes labels.
+    """
+    for ax_arr in np.nditer(fig.axes, flags=['refs_ok']):
+        ax = ax_arr.item()
+        x_lab = ax.get_xlabel()
+        y_lab = ax.get_ylabel()
+        if x_lab in labs_dict.keys():
+            ax.set_xlabel(labs_dict[x_lab])
+        if y_lab in labs_dict.keys():
+            ax.set_ylabel(labs_dict[y_lab])
+    return fig
+
+pplt_phys = replace_labs(pplt1, lab_replace)
+pplt_plane = replace_labs(pplt2, lab_replace)
 
 # %%[markdown]
 # ## Final figures used in article
