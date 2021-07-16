@@ -11,20 +11,24 @@ import matplotlib.pyplot as plt
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
-from bokeh.io import output_notebook
 from shapely.geometry import Point
-output_notebook()
+# from bokeh.io import output_notebook
+# output_notebook()
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
+# hv.extension('matplotlib')
+# gv.extension('matplotlib')
 import panel as pn
 import seaborn as sns
 import xarray as xr
+from xrspatial import hillshade
+from scipy.spatial.distance import pdist
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
 
 # Set project root directory
-ROOT_DIR = ROOT_DIR = Path(__file__).parents[1]
+ROOT_DIR = Path(__file__).parents[1]
 
 # Import custom project functions
 import sys
@@ -38,7 +42,7 @@ from my_functions import *
 # %% Import PAIPR-generated data
 
 # Import 20111109 results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109/')
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
 data_raw = import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -53,7 +57,7 @@ std2011_ALL = data_2011.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import 20161109 results
-dir2 = ROOT_DIR.joinpath('data/PAIPR-outputs/20161109/')
+dir2 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
 data_raw = import_PAIPR(dir2)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -97,6 +101,9 @@ std_2016 = std2016_ALL.iloc[
 gdf_PAIPR = gpd.GeoDataFrame(
     {'ID_2011': dist_overlap.index.values, 
     'ID_2016': dist_overlap['trace_ID'].values, 
+    'trace_dist': dist_overlap['distance'].values,
+    'QC_2011': gdf_2011.loc[dist_overlap.index,'QC_med'].values,
+    'QC_2016': dist_overlap['QC_med'].values, 
     'accum_2011': 
         accum_2011.mean(axis=0).values, 
     'accum_2016': 
@@ -134,58 +141,74 @@ chunk_centers = gpd.GeoDataFrame({
 #             -4.639E5, -4.640E5, -4.668E5]), 
 #     crs="EPSG:3031")
 
-#%% Data location map
+#%% Data map components
 
+# Accumulation plots for both flights
 plt_accum2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, size=1, 
-        bgcolor='silver', tools=['hover'], 
+        cmap='viridis', colorbar=True, size=12, 
+        bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 plt_accum2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
         projection=ANT_proj, color='accum', 
-        cmap='viridis', colorbar=True, size=1,
-        bgcolor='silver', tools=['hover'], 
+        cmap='viridis', colorbar=True, size=12,
+        bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 
+# Location plots for flights (and combined overlap)
 plt_loc2011 = gv.Points(
     gdf_2011, crs=ANT_proj, vdims=['accum','std']).opts(
         projection=ANT_proj, color='blue', alpha=0.9, 
-        size=5, bgcolor='silver', tools=['hover'], 
+        size=5, 
+        bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 plt_loc2016 = gv.Points(
     gdf_2016, crs=ANT_proj, vdims=['accum','std']).opts(
         projection=ANT_proj, color='red', alpha=0.9, 
-        size=5, bgcolor='silver', tools=['hover'], 
+        size=5, 
+        bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 plt_locCOMB = gv.Points(
-    gdf_PAIPR, crs=ANT_proj, 
+    gdf_PAIPR.iloc[0::25], crs=ANT_proj, 
     vdims=['accum_2011','accum_2016']).opts(
-        projection=ANT_proj, color='white', 
-        size=10, bgcolor='silver', tools=['hover'], 
+        projection=ANT_proj, color='cyan', 
+        size=24, alpha=0.5,
+        bgcolor='silver', 
+        tools=['hover'], 
         width=700, height=700)
 
 
-
+# Locations of manual tracing sites
 plt_manPTS = gv.Points(
     chunk_centers, crs=ANT_proj, 
     vdims='Site').opts(
         projection=ANT_proj, color='black', 
-        size=15, marker='square')
+        size=32, marker='square')
 
+# Labels for manual tracing locations
 plt_labels = hv.Labels(
     {'x': chunk_centers.geometry.x.values, 
     'y': chunk_centers.geometry.y.values, 
     'text': chunk_centers.Site.values}, 
     ['x','y'], 'text').opts(
         yoffset=20000, text_color='black', 
-        text_font_size='18pt')
+        text_font_size='28pt')
 
-# (
-#     plt_locCOMB * plt_manPTS 
-#     * (plt_accum2011 * plt_accum2016) * plt_labels
-# )
+# Location of example echograms in Fig S1
+echo_pt = gpd.GeoDataFrame(
+    gpd.GeoSeries(Point(-113.250, -79.215), crs='epsg:4326'))
+echo_pt = echo_pt.rename(
+    columns={0:'geometry'}).set_geometry('geometry')
+echo_pt.to_crs(epsg=3031, inplace=True)
+plt_echo = gv.Points(echo_pt, crs=ANT_proj).opts(
+    projection=ANT_proj, 
+    color='white', marker='star', size=20)
 
 # %%
 
@@ -212,6 +235,41 @@ tpl_bnds = (
 elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
     cmap='dimgray', colorbar=False, width=700, height=700)
 
+# Generate contour plot
+cont_plt = hv.operation.contours(elev_plt, levels=15).opts(
+    cmap='magma', show_legend=False, 
+    colorbar=True, line_width=3)
+
+# Generate elevation hillshade
+xr_HS = hillshade(xr_DEM)
+hill_plt = hv.Image(xr_HS.values, bounds=tpl_bnds).opts(
+        alpha=0.25, cmap='gray', colorbar=False)
+
+# %% Get ice velocities of trace locations
+
+xr_vice = xr.open_dataset(ROOT_DIR.joinpath(
+    'data/ice-velocities/antarctica_ice_velocity_450m_v2.nc'))
+xr_clip = xr_vice.sel(
+    x=slice(
+        gdf_PAIPR.total_bounds[0], 
+        gdf_PAIPR.total_bounds[2]), 
+    y=slice(
+        gdf_PAIPR.total_bounds[3], 
+        gdf_PAIPR.total_bounds[1]))
+xr_pts = extract_at_pts(
+    xr_clip, gdf_PAIPR.copy(), return_dist=True)
+vice_pts = gpd.GeoDataFrame(
+    data=xr_pts[['VX', 'VY']], crs='epsg:3031', 
+    geometry=xr_pts.geometry)
+vice_pts['Vxy'] = np.sqrt(
+    vice_pts['VX']**2 + vice_pts['VY']**2)
+
+gv.Points(vice_pts, crs=ANT_proj, 
+vdims=['Vxy', 'VX', 'VY']).opts(
+    projection=ANT_proj, color='Vxy', cmap='viridis', 
+    size=10, colorbar=True, logz=True,
+    width=800, height=800, tools=['hover'])
+
 # %% PAIPR residuals
 
 # Calculate residuals (as % bias of mean accumulation)
@@ -237,19 +295,29 @@ res_max = np.quantile(gdf_PAIPR.accum_res, 0.99)
 plt_accum = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_mu']).opts(
         projection=ANT_proj, color='accum_mu', 
-        bgcolor='silver', colorbar=True, cmap='viridis', 
+        # bgcolor='silver', 
+        colorbar=True, cmap='viridis', 
         tools=['hover'], width=700, height=700)
 
 plt_res = gv.Points(
     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
-        projection=ANT_proj, color='accum_res', size=3,
-        bgcolor='silver', colorbar=True, cmap='coolwarm_r', 
+        projection=ANT_proj, color='accum_res', size=12,
+        bgcolor='silver', 
+        colorbar=True, 
+        # cmap='seismic_r', 
+        cmap='BrBG',
         symmetric=True, tools=['hover'], 
-        width=600, height=600, fontsize=1.75)
+        width=600, height=600)
 
 
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
 # plt_res
+
+# %% Bias trend with QC rating
+
+fig, ax = plt.subplots()
+ax.scatter(x=abs(gdf_PAIPR['QC_2016']-gdf_PAIPR['QC_2011']), y=abs(gdf_PAIPR['accum_res']), color='red', alpha=0.25)
+ax.hlines(y=0, xmin=0, xmax=0.08, color='black')
 
 # %%
 
@@ -266,7 +334,7 @@ for label in chunk_centers['Site']:
         crs=gdf_PAIPR.crs).distance(
             gdf_PAIPR.reset_index()) <= 30000).values
     
-    gdf_PAIPR['Site'][idx] = label
+    gdf_PAIPR.loc[idx,'Site'] = label
 
 # Create dataframes for scatter plots
 PAIPR_df = pd.DataFrame(
@@ -333,7 +401,7 @@ paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 # %%
 
 # Import and format PAIPR results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109/')
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
 data_raw = import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -348,7 +416,8 @@ std2011_ALL = data_2011.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import and format manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20111109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2011 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -402,7 +471,7 @@ res2011_perc = 100*(res_2011 / accum_bar)
 
 # %%
 
-plt.rcParams.update({'font.size': 16})
+plt.rcParams.update({'font.size': 24})
 
 def plot_TScomp(
     ts_df1, ts_df2, gdf_combo, labels, 
@@ -501,7 +570,9 @@ def plot_TScomp(
 
         # Add legend and set title based on site name
         axes[i].grid(True)
-        axes[i].legend()
+
+        if i == 0:
+            axes[i].legend()
         # axes[i].set_title('Site '+site+' time series')
 
         if not yaxis:
@@ -571,7 +642,7 @@ tmp_df1['flight'] = 2011
 # %% Import 20161109 results
 
 # Import and format PAIPR results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20161109/')
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
 data_raw = import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -586,7 +657,8 @@ std2016_ALL = data_2016.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import and format manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20161109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20161109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2016 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -735,7 +807,8 @@ PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
 # %% Import manual results
 
 # Get list of 2011 manual files
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20111109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2011 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -751,7 +824,8 @@ gdf_man2011 = long2gdf(man_2011)
 gdf_man2011.to_crs(epsg=3031, inplace=True)
 
 # Perform same for 2016 manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20161109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20161109/smb-manual/')
 data_0 = import_PAIPR(dir_0)
 man_2016 = format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
@@ -910,28 +984,381 @@ tsfig_PAIPR = plot_TScomp(
     labels=['2011 PAIPR', '2016 PAIPR'], 
     ts_err1=std_2011, ts_err2=std_2016)
 
+
+
+
+# %%[markdown]
+# ## Investigations of spatial variability
+#  
+# %% Spatial coherence and variability
+
+def vario(
+    points_gdf, lag_size, 
+    d_metric='euclidean', vars='all', 
+    stationarize=False, scale=True):
+    """A function to calculate the experimental variogram for values associated with a geoDataFrame of points.
+
+    Args:
+        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
+        lag_size (int): The size of the lagging interval to use for binning semivariance values.
+        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
+        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
+        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
+
+    Returns:
+        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
+    """
+
+    # Get column names if 'all' is selected for "vars"
+    if vars == "all":
+        vars = points_gdf.drop(
+            columns='geometry').columns
+
+    # Extact trace coordinates and calculate pairwise distance
+    locs_arr = np.array(
+        [points_gdf.geometry.x, points_gdf.geometry.y]).T
+    dist_arr = pdist(locs_arr, metric=d_metric)
+
+    # Calculate the indices used for each pairwise calculation
+    i_idx = np.empty(dist_arr.shape)
+    j_idx = np.empty(dist_arr.shape)
+    m = locs_arr.shape[0]
+    for i in range(m):
+        for j in range(m):
+            if i < j < m:
+                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
+                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
+
+
+    if stationarize:
+        pass
+    
+    # Create dfs for paired-point values
+    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
+        drop=True)
+    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
+        drop=True)
+
+    # Calculate squared difference bewteen variable values
+    sqdiff_df = (i_vals - j_vals)**2
+    sqdiff_df['dist'] = dist_arr
+
+    # Create array of lag interval endpoints
+    d_max = lag_size * (dist_arr.max() // lag_size + 1)
+    lags = np.arange(0,d_max+1,lag_size)
+
+    # Group variables based on lagged distance intervals
+    df_groups = sqdiff_df.groupby(
+        pd.cut(sqdiff_df['dist'], lags))
+
+    # Calculate semivariance at each lag for each variable
+    gamma_vals = (1/2)*df_groups[vars].mean()
+    gamma_vals.index.name = 'lag'
+
+    if scale:
+        gamma_df = gamma_vals / gamma_vals.max()
+    else:
+        gamma_df = gamma_vals
+
+    # Add distance, lag center, and count values to output
+    gamma_df['dist'] = df_groups['dist'].mean()
+    gamma_df['lag_cent'] = lags[1::]-lag_size//2
+    gamma_df['cnt'] = df_groups['dist'].count()
+
+    return gamma_df
+
+# %%
+
+# Calculate variogram for PAIPR results
+gamma_df = vario(
+    gdf_PAIPR, lag_size=200, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# Generate random noise with matched characteristics to PAIPR results
+gdf_noise = gdf_PAIPR.copy()[
+    ['geometry', 'accum_mu', 'accum_res']]
+gdf_noise['accum_mu'] = np.random.normal(
+    loc=gdf_noise['accum_mu'].mean(), 
+    scale=gdf_noise['accum_mu'].std(), 
+    size=gdf_noise.shape[0])
+gdf_noise['accum_res'] = np.random.normal(
+    loc=gdf_noise['accum_res'].mean(), 
+    scale=gdf_noise['accum_res'].std(), 
+    size=gdf_noise.shape[0])
+
+# Calculate variogram for random noise results
+gamma_noise = vario(
+    gdf_noise, lag_size=200, vars=['accum_mu', 'accum_res'], 
+    scale=True)
+
+# %% Plots/exploration of semivariograms
+
+# According to the discussion [here](https://stats.stackexchange.com/questions/361220/how-can-i-understand-these-variograms), I should limit my empirical variogram to no more than 1/2 my total domain
+threshold = (3/5)*gamma_df['dist'].max()
+data1 = gamma_df.query('dist <= @threshold')
+data2 = gamma_noise.query('dist <= @threshold')
+
+# Plots of mean accum and accum residuals variograms between PAIPR and noise
+fig_var, axes = plt.subplots(1, 2, figsize=(24,9))
+data1.plot(
+    kind='scatter', ax=axes[0], color='blue', 
+    x='lag_cent', y='accum_mu', label='Real data')
+data2.plot(
+    kind='scatter', ax=axes[0], color='red', 
+    x='lag_cent', y='accum_mu', label='Noise')
+axes[0].set_xlabel('Lag distance (m)')
+axes[0].set_ylabel('Mean accum variogram')
+data1.plot(
+    kind='scatter', ax=axes[1], color='blue', 
+    x='lag_cent', y='accum_res', label='Real data')
+data2.plot(
+    kind='scatter', ax=axes[1], color='red', 
+    x='lag_cent', y='accum_res', label='Noise')
+axes[1].set_xlabel('Lag distance (m)')
+axes[1].set_ylabel('Accum residual variogram')
+
+# %% Download missing REMA data
+
+# Set REMA data directory
+REMA_DIR = Path(
+    '/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA')
+
+# Import shapefile of DEM tile locations
+dem_index = gpd.read_file(REMA_DIR.joinpath(
+    'REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp'))
+
+# Keep only DEMs that contain accum traces
+dem_index = (
+    gpd.sjoin(dem_index, gdf_PAIPR, op='contains').iloc[
+        :,0:dem_index.shape[1]]).drop_duplicates()
+
+# Find and download missing REMA DSM tiles
+tiles_list = pd.DataFrame(
+    dem_index.drop(columns='geometry'))
+get_REMA(tiles_list, REMA_DIR.joinpath('tiles_8m_v1.1'))
+
+# %% Calculate slope/aspect for all REMA tiles
+
+# Generate list of paths to downloaded DEMs required for topo calculations at given points
+dem_list = [
+    path for path 
+    in REMA_DIR.joinpath("tiles_8m_v1.1").glob('**/*dem.tif') 
+    if any(tile in str(path) for tile in dem_index.tile)]
+
+# Calculate slope and aspect for each DEM (only ones not already present)
+[calc_topo(dem) for dem in dem_list]
+
+# %% Extract topo values and add to PAIPR gdf
+
+# Extract elevation, slope, and aspect values for each trace 
+# location
+tif_dirs = [path.parent for path in dem_list]
+for path in tif_dirs:
+    gdf_PAIPR = topo_vals(
+        path, gdf_PAIPR, slope=True, aspect=True)
+
+# Set elev/slope/aspect to NaN for locations where elev<0
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'elev'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'slope'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['elev']<0,'aspect'] = np.nan
+
+# Remove extreme slope values
+gdf_PAIPR.loc[gdf_PAIPR['slope']>60,'slope'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'elev'] = np.nan
+gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'aspect'] = np.nan
+
+# %% Extract flight parameters
+
+def get_FlightData(flight_dir):
+    """Function to extract OIB flight parameter data from .nc files and convert to geodataframe.
+
+    Args:
+        flight_dir (pathlib.PosixPath): The directory containing the .nc OIB files to extract and convert.
+
+    Returns:
+        geopandas.geodataframe.GeoDataFrame: Table of OIB flight parameters (altitude, heading, lat, lon, pitch, and roll) with their corresponding surface location and collection time.
+    """
+    # List of files to extract from
+    nc_files = [file for file in flight_dir.glob('*.nc')]
+    
+    # Load as xarray dataset
+    xr_flight = xr.open_dataset(
+        nc_files.pop(0))[[
+            'altitude', 'heading', 'lat', 
+            'lon', 'pitch','roll']]
+
+    # Concatenate data from all flights in directory
+    for file in nc_files:
+
+        flight_i = xr.open_dataset(file)[[
+            'altitude', 'heading', 'lat', 
+            'lon', 'pitch','roll']]
+        xr_flight = xr.concat(
+            [xr_flight, flight_i], dim='time')
+
+    # Convert to dataframe and average values to ~200 m resolution
+    flight_data = xr_flight.to_dataframe()
+    flight_coarse = flight_data.rolling(
+        window=40, min_periods=1).mean().iloc[0::40]
+
+    # Convert to geodataframe in Antarctic coordinates
+    gdf_flight = gpd.GeoDataFrame(
+        data=flight_coarse.drop(columns=['lat', 'lon']), 
+        geometry=gpd.points_from_xy(
+            flight_coarse.lon, flight_coarse.lat), 
+        crs='EPSG:4326').reset_index().to_crs(epsg=3031)
+
+    return gdf_flight
+
+
+def path_dist(locs):
+    """Function to calculate the cummulative distance between points along a given path.
+
+    Args:
+        locs (numpy.ndarray): 2D array of points along the path to calculate distance.
+    """
+    # Preallocate array for distances between adjacent points
+    dist_seg = np.empty(locs.shape[0])
+
+    # Calculate the distances bewteen adjacent points in array
+    for i in range(locs.shape[0]):
+        if i == 0:
+            dist_seg[i] = 0
+        else:
+            pos_0 = locs[i-1]
+            pos = locs[i]
+            dist_seg[i] = np.sqrt(
+                (pos[0] - pos_0[0])**2 
+                + (pos[1] - pos_0[1])**2)
+
+    # Find cummulative path distance along given array
+    dist_cum = np.cumsum(dist_seg)
+
+    return dist_cum
+
+#%%
+
+# # Assign OIB flight data directory
+# OIB_DIR = Path(
+#     '/media/durbank/WARP/Research/Antarctica/Data/IceBridge/WAIS-central')
+# gdf_flight2011 = get_FlightData(OIB_DIR.joinpath('20111109'))
+# gdf_flight2016 = get_FlightData(OIB_DIR.joinpath('20161109'))
+
+# # Save data for future use (cuts repetative computation time)
+# gdf_flight2011.to_file(
+#     ROOT_DIR.joinpath('data/flight_params/flight_20111109.geojson'), 
+#     driver='GeoJSON')
+# gdf_flight2016.to_file(
+#     ROOT_DIR.joinpath('data/flight_params/flight_20161109.geojson'), 
+#     driver='GeoJSON')
+
+# Load flight parameter data
+gdf_flight2011 = gpd.read_file(
+    ROOT_DIR.joinpath('data/flight_params/flight_20111109.geojson'))
+gdf_flight2016 = gpd.read_file(
+    ROOT_DIR.joinpath('data/flight_params/flight_20161109.geojson'))
+
+# locs_2011 = np.array([
+#     gdf_flight2011.geometry.x, 
+#     gdf_flight2011.geometry.y]).T
+
+# dist_2011 = path_dist(locs_2011)
+
+# %% Add intersecting flight parameter data to PAIPR gdf
+
+# Find nearest neighbors between gdf_PAIPR and gdf_flight2011
+dist_2011 = pd.DataFrame(nearest_neighbor(
+    gdf_PAIPR, gdf_flight2011, 
+    return_dist=True).drop(
+        columns=['time', 'geometry'])).add_suffix('_res')
+dist_2011['plane_elev'] = dist_2011['altitude_res']-gdf_PAIPR['elev']
+# dist_2011 = nearest_neighbor(
+#     gdf_PAIPR, gdf_flight2011, 
+#     return_dist=True).drop(
+#         columns=['time', 'geometry']).add_suffix('_2011')
+# gdf_PAIPR = gdf_PAIPR.join(dist_2011)
+
+# Find nearest neighbors between gdf_PAIPR and gdf_flight2016
+dist_2016 = pd.DataFrame(nearest_neighbor(
+    gdf_PAIPR, gdf_flight2016, 
+    return_dist=True).drop(
+        columns=['time', 'geometry'])).add_suffix('_res')
+dist_2016['plane_elev'] = dist_2016['altitude_res']-gdf_PAIPR['elev']
+# dist_2016 = nearest_neighbor(
+#     gdf_PAIPR, gdf_flight2016, 
+#     return_dist=True).drop(
+#         columns=['time', 'geometry']).add_suffix('_2016')
+# gdf_PAIPR = gdf_PAIPR.join(dist_2016)
+
+plane_res = abs(dist_2016 - dist_2011).drop(
+    columns=['altitude_res', 'distance_res'])
+
+# Add column for absolute value of accum res
+gdf_PAIPR['res_abs'] = np.abs(gdf_PAIPR['accum_res'])
+
+# Join data to gdf_PAIPR
+gdf_PAIPR = gdf_PAIPR.join(plane_res)
+
+# %% Paired correlation plots for variables
+
+lab_replace = {
+    'res_abs': 'Accum % bias',
+    'trace_dist': 'Trace distance (m)', 
+    'elev': 'Elevation (m)', 
+    'slope': 'Slope', 'aspect':'Aspect (degrees)',
+    'plane_elev':'Altitude bias (m)', 
+    'heading_res':'Heading bias (degrees)', 
+    'pitch_res':'Pitch bias (degrees)', 
+    'roll_res':'Roll bias (degrees)'}
+
+pplt1 = sns.pairplot(
+    data=gdf_PAIPR, kind='scatter',
+    x_vars=[
+        'trace_dist', 'elev', 
+        'slope', 'aspect'], 
+    y_vars=['res_abs'], dropna=True, 
+    plot_kws={
+        # 'line_kws':{'color':'red'}, 
+        # 'scatter_kws': {'alpha': 0.1}}, 
+        'alpha':0.1},
+    height=5)
+
+pplt2 = sns.pairplot(
+    data=gdf_PAIPR, kind='scatter', 
+    x_vars=[
+        'plane_elev', 'heading_res', 
+        'pitch_res', 'roll_res'], 
+    y_vars=['res_abs'], dropna=True, 
+        plot_kws={
+        # 'line_kws':{'color':'red'}, 
+        # 'scatter_kws': {'alpha': 0.1}}, 
+        'alpha':0.1},
+    height=5)
+
+def replace_labs(fig, labs_dict):
+    """Helper function to replace axis labels in seaborn pairplot.
+
+    Args:
+        fig (seaborn.axisgrid.PairGrid): The seaborn pairplot figure to modify
+        labs_dict (dict): Dictionary of labels to replace and what to replace them with.
+    Return (seaborn.axisgrid.PairGrid): The seaborn figure with modified axes labels.
+    """
+    for ax_arr in np.nditer(fig.axes, flags=['refs_ok']):
+        ax = ax_arr.item()
+        x_lab = ax.get_xlabel()
+        y_lab = ax.get_ylabel()
+        if x_lab in labs_dict.keys():
+            ax.set_xlabel(labs_dict[x_lab])
+        if y_lab in labs_dict.keys():
+            ax.set_ylabel(labs_dict[y_lab])
+    return fig
+
+pplt_phys = replace_labs(pplt1, lab_replace)
+pplt_plane = replace_labs(pplt2, lab_replace)
+
 # %%[markdown]
 # ## Final figures used in article
 # 
-# %% Data location map
-
-data_map = (
-    elev_plt.opts(colorbar=False)
-    * plt_locCOMB * plt_manPTS 
-    * (plt_accum2011 * plt_accum2016) 
-    * plt_labels.opts(text_font_size='32pt')
-)
-
-data_map = data_map.opts(fontscale=2.5, width=1200, height=1200)
-
-res_map = (
-    elev_plt.opts(colorbar=False) * plt_manPTS* plt_res 
-    * plt_labels.opts(text_font_size='32pt'))
-res_map = res_map.opts(fontscale=2.5, width=1200, height=1200)
-
-elev_bar = elev_plt.opts(
-    colorbar=True, fontscale=2.5, width=1200, height=1200)
-
 # %%
 
 # PAIPR_df = PAIPR_df.query("Site != 'Null'")
@@ -974,6 +1401,86 @@ sns.kdeplot(
     label='2016-2011 manual', linewidth=4, color='#009e73')
 ax1.legend()
 ax1.set_xlabel('% Bias')
+
+
+# %% Paired t tests for PAIPR
+
+from scipy import stats
+
+val_bias = []
+t_stat = []
+t_crit = []
+p_val = []
+moe_val = []
+for site in np.unique(PAIPR_df.Site):
+
+    data_i = PAIPR_df.query('Site == @site')
+    SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
+    t_i = abs(data_i['res_perc'].mean()/SE_i)
+    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+
+    val_bias.append(data_i['res_perc'].mean())
+    t_stat.append(t_i)
+    t_crit.append(crit_i)
+    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    moe_val.append(crit_i*SE_i)
+
+    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
+
+print(p_val)
+print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
+
+# %% Paired t tests for PAIPR (averaged by year)
+
+from scipy import stats
+
+val_bias = []
+t_stat = []
+t_crit = []
+p_val = []
+moe_val = []
+for site in np.unique(PAIPR_df.Site):
+
+    data_i = PAIPR_df.query('Site == @site').groupby('Year').mean()
+    SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
+    t_i = abs(data_i['res_perc'].mean()/SE_i)
+    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+
+    val_bias.append(data_i['res_perc'].mean())
+    t_stat.append(t_i)
+    t_crit.append(crit_i)
+    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    moe_val.append(crit_i*SE_i)
+
+    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
+
+print(p_val)
+
+# %% Paired t tests for manual
+
+from scipy import stats
+
+val_bias = []
+t_stat = []
+t_crit = []
+p_val = []
+moe_val = []
+for site in np.unique(man_df.Site):
+
+    data_i = man_df.query('Site == @site')
+    SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
+    t_i = abs(data_i['res_perc'].mean()/SE_i)
+    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+
+    val_bias.append(data_i['res_perc'].mean())
+    t_stat.append(t_i)
+    t_crit.append(crit_i)
+    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    moe_val.append(crit_i*SE_i)
+
+    print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
+
+print(p_val)
 
 # %%
 
@@ -1184,6 +1691,7 @@ def panels_121(
         plot_min (float, optional): Specify a lower bound to the generated plots. Defaults to None.
         plot_max (float, optional): Specifies an upper bound to the generated plots. Defaults to None.
         size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 500.
+        # font_scaler (float, optional): How much to scale the generated plot text. Defaults to no additional scaling.
 
     Returns:
         holoviews.core.layout.Layout: Figure Layout consisting of multiple 1:1 subplots and a subplot with kernel density estimates of the residuals of the various datum.
@@ -1239,7 +1747,13 @@ def panels_121(
 
         # Combine 1:1 line and scatter plot and add to plot list
         one2one_plt = (one2one_line * scatt_yr).opts(
-            width=size, height=size, fontscale=2)
+            width=size, height=size, 
+            # fontscale=3,
+            fontsize={'ticks':20, 'xticks':30, 'yticks':30}, 
+            xrotation=90, 
+            xticks=4, yticks=4)
+        if i==len(datum)-1:
+            one2one_plt.opts(width=int(size+0.10*size))
         one2one_plts.append(one2one_plt)
 
         # Generate kde for residuals of given estimates and 
@@ -1249,22 +1763,29 @@ def panels_121(
             / data[[x_var, y_var]].mean(axis=1))
         kde_plot = hv.Distribution(
             kde_data, label=kde_labels[i]).opts(
-            filled=False, line_color=kde_colors[i])
+            filled=False, line_color=kde_colors[i], 
+            line_width=5)
         kde_plots.append(kde_plot)
 
     # Generate and decorate combined density subplot
     fig_kde = (
         kde_plots[0] * kde_plots[1] 
         * kde_plots[2] * kde_plots[3]).opts(
-            xaxis=None, yaxis='right', 
-            width=size, height=size, 
-            show_grid=True, fontscale=2)
+            xaxis=None, yaxis=None, 
+            width=size, height=size, show_grid=True
+        )
     
     # Specific formatting based on subplot position
     if TOP:
-        fig_kde = fig_kde.opts(xaxis='top', xlabel='% Bias')
-    if BOTTOM:
-        fig_kde = fig_kde.opts(xaxis='bottom', xlabel='% Bias')
+        fig_kde = fig_kde.opts(
+            xaxis='top', xlabel='% Bias', xrotation=90, 
+            fontsize={'legend':25, 'xticks':18, 'xlabel':22})
+    elif BOTTOM:
+        fig_kde = fig_kde.opts(
+            xaxis='bottom', xlabel='% Bias', xrotation=90,
+            fontsize={'legend':25, 'xticks':18, 'xlabel':22})
+    else:
+        fig_kde = fig_kde.opts(show_legend=False)
 
 
     # Generate final panel Layout with 1:1 and kde plots
@@ -1293,6 +1814,7 @@ site_list.remove("Null")
 # Iterate through sites
 for i, site in enumerate(site_list):
 
+
     paipr_i = PAIPR_df.query("Site == @site")
     man_i = man_df.query("Site == @site")
     df2011_i = df_2011.query("Site == @site")
@@ -1316,6 +1838,29 @@ fig_supp2 = hv.Layout(
     + figs_supp2[3] + figs_supp2[4] + figs_supp2[5]
     + figs_supp2[6]).cols(5)
 
+# %% Data location map
+
+data_map = (
+    # elev_plt.opts(colorbar=False)
+    hill_plt
+    * cont_plt.opts(colorbar=False)
+    * plt_locCOMB 
+    * plt_manPTS 
+    * (plt_accum2011 * plt_accum2016) 
+    * plt_echo
+    * plt_labels.opts(text_font_size='36pt')
+    ).opts(fontscale=3, width=1200, height=1200)
+
+res_map = (
+    # elev_plt.opts(colorbar=False) 
+    hill_plt * 
+    cont_plt.opts(colorbar=False)
+    * plt_manPTS* plt_res 
+    * plt_labels.opts(text_font_size='36pt')
+    ).opts(
+        ylim=(gdf_bounds['y_range'][0], -2.25E5), 
+        fontscale=3, width=1200, height=715)
+
 # %%
 
 tsfig_PAIPR.savefig(
@@ -1333,6 +1878,519 @@ tsfig_2016.savefig(
 
 kde_fig.savefig(fname=ROOT_DIR.joinpath(
     'docs/Figures/oib-repeat/kde_fig.svg'))
+
+hv.save(data_map, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/data_map.png'))
+hv.save(res_map, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/res_map.png'))
+hv.save(fig_supp2, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/one2one_plts.png'))
+
+# %%
+
+cont_bar = cont_plt.opts(
+    colorbar=True, fontscale=3, width=1200, height=1200)
+hv.save(cont_bar, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/cont_bar.png'))
+
+# %% Example 2011 echogram figure
+
+echo2011 = xr.load_dataset(
+    ROOT_DIR.joinpath(
+        'data/oib-examples/IRSNO1B_20111109_02_255.nc'))[
+            ['amplitude', 'lat', 'lon', 
+            'Surface', 'fasttime']].transpose()
+
+# Calculate distance along time dimension and add to ds
+tmp = gpd.GeoDataFrame(
+    geometry=gpd.points_from_xy(
+        echo2011['lon'].data, echo2011['lat'].data, 
+        crs='epsg:4326'))
+tmp.to_crs(epsg=3031, inplace=True)
+echo2011['distance'] = (
+    ('time'), 
+    np.flip(path_dist(
+        np.array([tmp.geometry.x, tmp.geometry.y]).T)))
+
+# Set new coordinates
+echo2011 = echo2011.set_coords(['fasttime', 'distance'])
+
+# Clip data to same distance above/below the surface
+amp_data = echo2011['amplitude'].data
+time_delay = pd.DataFrame({'fasttime':echo2011['fasttime'].data})
+surf = echo2011['Surface'].data
+
+v_depth = 1300
+clip_data = np.empty((v_depth, amp_data.shape[1]))
+time_data = np.empty((v_depth, amp_data.shape[1]), dtype='<m8[ns]')
+v_offset = np.timedelta64(12, 'ns')
+for i in range(amp_data.shape[1]):
+    col = amp_data[:,i]
+    start_idx = time_delay[
+        time_delay['fasttime'].gt((surf[i]-v_offset))].index[0]
+    time_data[:,i] = time_delay.loc[
+        start_idx:start_idx+v_depth-1, 'fasttime'].values
+    clip_data[:,i] = col[start_idx:start_idx+v_depth]
+
+# Generate approximate depth index
+depth = np.linspace(-1, 16, num=v_depth)
+
+# HV dataset of echogram
+echo2011_hv = hv.Dataset(
+    (echo2011['distance'].data, 
+    depth, 
+    (clip_data-clip_data.mean())/clip_data.std()), 
+    ['distance', 'depth'], 'amplitude')
+
+# Plot 2011 echogram
+echo2011_plt = hv.Image(echo2011_hv).opts(
+    invert_yaxis=True, cmap='bone', 
+    width=1000, height=500, fontscale=2, 
+    xlabel='Distance (m)', ylabel='Depth (m)')
+
+# %% Example 2016 echogram figure
+
+echo2016 = xr.load_dataset(
+    ROOT_DIR.joinpath(
+        'data/oib-examples/IRSNO1B_20161109_02_364.nc'))[
+            ['amplitude', 'lat', 'lon', 
+            'Surface', 'fasttime']].transpose()
+
+# Calculate distance along time dimension and add to ds
+tmp = gpd.GeoDataFrame(
+    geometry=gpd.points_from_xy(
+        echo2016['lon'].data, echo2016['lat'].data, 
+        crs='epsg:4326'))
+tmp.to_crs(epsg=3031, inplace=True)
+echo2016['distance'] = (
+    ('time'), 
+    np.flip(path_dist(
+        np.array([tmp.geometry.x, tmp.geometry.y]).T)))
+
+# Set new coordinates
+echo2016 = echo2016.set_coords(['fasttime', 'distance'])
+
+# Clip data to same distance above/below the surface
+amp_data = echo2016['amplitude'].data
+time_delay = pd.DataFrame({'fasttime':echo2016['fasttime'].data})
+surf = echo2016['Surface'].data
+
+v_depth = 1700
+clip_data = np.empty((v_depth, amp_data.shape[1]))
+time_data = np.empty((v_depth, amp_data.shape[1]), dtype='<m8[ns]')
+v_offset = np.timedelta64(10, 'ns')
+for i in range(amp_data.shape[1]):
+    col = amp_data[:,i]
+    start_idx = time_delay[
+        time_delay['fasttime'].gt((surf[i]-v_offset))].index[0]
+    time_data[:,i] = time_delay.loc[
+        start_idx:start_idx+v_depth-1, 'fasttime'].values
+    clip_data[:,i] = col[start_idx:start_idx+v_depth]
+
+# Generate approximate depth index
+depth = np.linspace(-1, 16, num=v_depth)
+
+# HV dataset of echogram
+echo2016_hv = hv.Dataset(
+    (echo2016['distance'].data, 
+    depth, 
+    (clip_data-clip_data.mean())/clip_data.std()), 
+    ['distance', 'depth'], 'amplitude')
+
+# Plot 2011 echogram
+echo2016_plt = hv.Image(echo2016_hv).opts(
+    invert_yaxis=True, cmap='bone', 
+    width=1000, height=500, fontscale=2, 
+    xlabel='Distance (m)', ylabel='Depth (m)')
+
+# (echo2011_plt + echo2016_plt)
+
+# %%
+
+hv.save(echo2011_plt, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/echo2011.png'))
+hv.save(echo2016_plt, ROOT_DIR.joinpath(
+    'docs/Figures/oib-repeat/echo2016.png'))
+
+# %%[markdown]
+# ## Investigations of depth variability and QC effect
+# 
+# %%
+
+# Import current 20111109 results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
+data_raw = import_PAIPR(dir_)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+smb_2011 = format_PAIPR(
+    data_0, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1).set_index(['collect_time', 'Year'])
+
+# Import 20111109 depth results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/depth/')
+depth_2011 = import_PAIPR(dir_).rename(
+    columns={"IHR_year":"Year"}).set_index(
+        ['collect_time', 'Year'])
+
+# Join 2011 dataframes and extract gdf locations
+df_depths2011 = smb_2011.join(
+    depth_2011.drop(columns=['Lat', 'Lon']), 
+    how='inner').reset_index().groupby(
+        ['trace_ID', 'Year']).mean()
+df_grouped2011 = df_depths2011[['Lat', 'Lon']].groupby(
+        'trace_ID').mean().reset_index()
+gdf_depth2011 = gpd.GeoDataFrame(
+    data=df_grouped2011.drop(columns=['Lat', 'Lon']), 
+    geometry=gpd.points_from_xy(
+        x=df_grouped2011.Lon, y=df_grouped2011.Lat), 
+    crs="EPSG:4326")
+gdf_depth2011.to_crs(epsg=3031, inplace=True)
+
+# ## Repeat for 2016 data
+
+# Import current 20161109 results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
+data_raw = import_PAIPR(dir_)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+smb_2016 = format_PAIPR(
+    data_0, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1).set_index(['collect_time', 'Year'])
+
+# Import 20161109 depth results
+dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/depth/')
+depth_2016 = import_PAIPR(dir_).rename(
+    columns={"IHR_year":"Year"}).set_index(
+        ['collect_time', 'Year'])
+
+# Join 2016 dataframes and extract gdf locations
+df_depths2016 = smb_2016.join(
+    depth_2016.drop(columns=['Lat', 'Lon']), 
+    how='inner').reset_index().groupby(
+        ['trace_ID', 'Year']).mean()
+df_grouped2016 = df_depths2016[['Lat', 'Lon']].groupby(
+        'trace_ID').mean().reset_index()
+gdf_depth2016 = gpd.GeoDataFrame(
+    data=df_grouped2016.drop(columns=['Lat', 'Lon']), 
+    geometry=gpd.points_from_xy(
+        x=df_grouped2016.Lon, y=df_grouped2016.Lat), 
+    crs="EPSG:4326")
+gdf_depth2016.to_crs(epsg=3031, inplace=True)
+
+
+# Find nearest neighbors between 2011 and 2016 
+# (within 500 m)
+df_dist = nearest_neighbor(
+    gdf_depth2011, gdf_depth2016, return_dist=True)
+idx_paipr = df_dist['distance'] <= 250
+dist_overlap = df_dist[idx_paipr]
+
+
+yr_vals = np.arange(
+    df_depths2011.index.get_level_values(1).min(), 
+    df_depths2011.index.get_level_values(1).max()+1)
+
+
+ID_2011 = gdf_depth2011.loc[dist_overlap.index,'trace_ID'].values
+midx_2011 = pd.MultiIndex.from_arrays([
+    np.repeat(ID_2011, yr_vals.shape[0]), 
+    np.tile(yr_vals, ID_2011.shape[0])], 
+    names=['trace_ID', 'Year'])
+depths_2011 = df_depths2011.loc[midx_2011]
+
+ID_2016 = dist_overlap['trace_ID'].values
+midx_2016 = pd.MultiIndex.from_arrays([
+    np.repeat(ID_2016, yr_vals.shape[0]), 
+    np.tile(yr_vals, ID_2016.shape[0])], 
+    names=['trace_ID', 'Year'])
+depths_2016 = df_depths2016.loc[midx_2016]
+
+
+# Create new combined df for investigating depth differences
+df_depths = pd.DataFrame(
+    {'ID_new':np.repeat(
+        np.arange(depths_2011.shape[0]/yr_vals.shape[0]), 
+        yr_vals.shape[0]), 
+    'ID_2011':depths_2011.index.get_level_values(0), 
+    'ID_2016':depths_2016.index.get_level_values(0), 
+    'Year':depths_2011.index.get_level_values(1), 
+    'Lat':depths_2011['Lat'].values, 
+    'Lon':depths_2011['Lon'].values, 
+    'elev_2011':depths_2011['elev'].values, 
+    'elev_2016':depths_2016['elev'].values, 
+    'depth_2011':depths_2011['IHR_depth'].values, 
+    'depth_2016':depths_2016['IHR_depth'].values})
+df_depths['depth_res'] = (
+    df_depths['depth_2016'] - df_depths['depth_2011'])
+
+# %% 
+
+hv.Distribution(df_depths, kdims=['depth_res'], vdims=['Year']).groupby('Year')
+
+
+# %% Compare PAIPR results from different random seeds
+
+# Import old 20111109 results
+dir_old = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109')
+data_old = import_PAIPR(dir_old)
+data_old.query('QC_flag != 2', inplace=True)
+smb_old = data_old.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+data_test = format_PAIPR(
+    smb_old, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1)
+aTest_ALL = data_test.pivot(
+    index='Year', columns='trace_ID', values='accum')
+stdTest_ALL = data_test.pivot(
+    index='Year', columns='trace_ID', values='std')
+
+# Import current 20111109 results
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
+data_raw = import_PAIPR(dir1)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+data_2011 = format_PAIPR(
+    data_0, start_yr=1990, end_yr=2010).drop(
+    'elev', axis=1)
+a2011_ALL = data_2011.pivot(
+    index='Year', columns='trace_ID', values='accum')
+std2011_ALL = data_2011.pivot(
+    index='Year', columns='trace_ID', values='std')
+
+# Create gdf of mean results for each trace and 
+# transform to Antarctic Polar Stereographic
+gdf_TestData = long2gdf(data_test)
+gdf_TestData.to_crs(epsg=3031, inplace=True)
+gdf_2011 = long2gdf(data_2011)
+gdf_2011.to_crs(epsg=3031, inplace=True)
+
+df_dist = nearest_neighbor(
+    gdf_2011, gdf_TestData, return_dist=True)
+idx_paipr = df_dist['distance'] <= 100
+dist_overlap = df_dist[idx_paipr]
+
+# Create numpy arrays for relevant results
+accum_2011_test = a2011_ALL.iloc[
+    :,dist_overlap.index]
+std_2011_test = std2011_ALL.iloc[
+    :,dist_overlap.index]
+accum_test = aTest_ALL.iloc[
+    :,dist_overlap['trace_ID']]
+std_test = stdTest_ALL.iloc[
+    :,dist_overlap['trace_ID']]
+
+# Create new gdf of subsetted results
+gdf_test = gpd.GeoDataFrame(
+    {'ID_2011': dist_overlap.index.values, 
+    'ID_test': dist_overlap['trace_ID'].values, 
+    'trace_dist': dist_overlap['distance'].values,
+    'accum_2011': 
+        accum_2011_test.mean(axis=0).values, 
+    'accum_test': 
+        accum_test.mean(axis=0).values},
+    geometry=dist_overlap.geometry.values)
+
+# Calculate bulk accum mean and accum residual
+gdf_test['accum_mu'] = gdf_test[
+    ['accum_2011', 'accum_test']].mean(axis=1)
+gdf_test['accum_res'] = (
+    (gdf_test.accum_test - gdf_test.accum_2011) 
+    / gdf_test.accum_mu)
+
+gv.Points(
+    gdf_test, vdims=['accum_mu', 'accum_res'], 
+    crs=ANT_proj).opts(
+        projection=ANT_proj, color='accum_res', size=5, 
+        cmap='coolwarm_r', colorbar=True, symmetric=True, 
+        tools=['hover'], height=750, width=750)
+
+
+
+
+
+# Generate indices corresponding to desired sites
+gdf_test['Site'] = np.repeat(
+    'Null', gdf_test.shape[0])
+for label in chunk_centers['Site']:
+
+    geom = chunk_centers.query('Site == @label').geometry
+    idx = (gpd.GeoSeries(
+        data=gpd.points_from_xy(
+            np.repeat(geom.x, gdf_test.shape[0]), 
+            np.repeat(geom.y, gdf_test.shape[0])), 
+        crs=gdf_test.crs).distance(
+            gdf_test.reset_index()) <= 30000).values
+    
+    gdf_test.loc[idx,'Site'] = label
+
+# Create dataframes for scatter plots
+PAIPR_df = pd.DataFrame(
+    {'tmp_ID': np.tile(
+        np.arange(0,accum_2011_test.shape[1]), 
+        accum_2011_test.shape[0]), 
+    'Site': np.tile(
+        gdf_test['Site'], accum_2011_test.shape[0]), 
+    'Year': np.reshape(
+        np.repeat(
+            accum_2011_test.index, accum_2011_test.shape[1]), 
+        accum_2011_test.size), 
+    'accum_2011': 
+        np.reshape(
+            accum_2011_test.values, accum_2011_test.size), 
+    'std_2011': np.reshape(
+        std_2011_test.values, std_2011_test.size), 
+    'accum_test': np.reshape(
+        accum_test.values, accum_test.size), 
+    'std_test': np.reshape(
+        std_test.values, std_test.size)})
+
+# Add residuals to dataframe
+PAIPR_df['res_accum'] = PAIPR_df['accum_test']-PAIPR_df['accum_2011']
+PAIPR_df['res_perc'] = (
+    100*(PAIPR_df['res_accum'])
+    /(PAIPR_df[['accum_test','accum_2011']]).mean(axis=1))
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+
+scatt_yr = hv.Points(
+    data=PAIPR_df, 
+    kdims=['accum_2011', 'accum_test'], 
+    vdims=['Year'])
+    
+test_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 PAIPR (mm/yr)', 
+    ylabel='Test PAIPR (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600, fontscale=1.75)
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+scatt_yr = hv.Points(
+    data=PAIPR_df, 
+    kdims=['accum_2011', 'accum_test'], 
+    vdims=['Year', 'Site']).groupby('Site')
+test_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 flight (mm/yr)', 
+    ylabel='Test flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600, fontscale=1.75)
+
+test_1to1_plt + site_res_plt
+
+ # %%[markdown]
+# ## Matplotlib versions of final figures (WIP)
+#  
+# %% matplotlib versions
+
+# plt_accum2011 = gv.Points(
+#     gdf_2011, crs=ANT_proj, vdims=['accum']).opts(
+#         projection=ANT_proj, color='accum', 
+#         cmap='viridis', colorbar=True, s=50)
+# plt_accum2016 = gv.Points(
+#     gdf_2016, crs=ANT_proj, vdims=['accum']).opts(
+#         projection=ANT_proj, color='accum', 
+#         cmap='viridis', colorbar=True, s=50)
+
+# # plt_loc2011 = gv.Points(
+# #     gdf_2011, crs=ANT_proj, vdims=['accum','std']).opts(
+# #         projection=ANT_proj, color='blue', alpha=0.9, 
+# #         s=25)
+# # plt_loc2016 = gv.Points(
+# #     gdf_2016, crs=ANT_proj, vdims=['accum','std']).opts(
+# #         projection=ANT_proj, color='red', alpha=0.9, 
+# #         s=25)
+# plt_locCOMB = gv.Points(
+#     gdf_PAIPR, crs=ANT_proj, 
+#     vdims=['accum_2011','accum_2016']).opts(
+#         projection=ANT_proj, color='orange', 
+#         s=200)
+
+
+
+# plt_manPTS = gv.Points(
+#     chunk_centers, crs=ANT_proj, 
+#     vdims='Site').opts(
+#         projection=ANT_proj, color='black', 
+#         s=350, marker='s')
+
+# plt_labels = hv.Labels(
+#     {'x': chunk_centers.geometry.x.values, 
+#     'y': chunk_centers.geometry.y.values, 
+#     'text': chunk_centers.Site.values}, 
+#     ['x','y'], 'text').opts(
+#         yoffset=20000, color='black', 
+#         size=28)
+
+
+
+# elev_plt = hv.Image(xr_DEM.values, bounds=tpl_bnds).opts(
+#     cmap='dimgray', colorbar=False)
+
+# # Generate contour plot
+# cont_plt = hv.operation.contours(elev_plt, levels=15).opts(
+#     cmap='cividis', show_legend=False, 
+#     colorbar=True, linewidth=2)
+
+# # Generate elevation hillshade
+# xr_HS = hillshade(xr_DEM)
+# hill_plt = hv.Image(xr_HS.values, bounds=tpl_bnds).opts(
+#         alpha=0.25, cmap='gray', colorbar=False)
+
+# # Residuals plot
+# plt_res = gv.Points(
+#     data=gdf_PAIPR, crs=ANT_proj, vdims=['accum_res']).opts(
+#         projection=ANT_proj, color='accum_res', s=50,
+#         colorbar=True, cmap='coolwarm_r', symmetric=True)
+# plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
+
+
+
+
+# data_map = (
+#     hill_plt
+#     * cont_plt.opts(colorbar=False)
+#     * plt_locCOMB * plt_manPTS 
+#     * (plt_accum2011 * plt_accum2016) 
+#     * plt_labels.opts(size=36)
+#     ).opts(fontscale=2, aspect=1, fig_inches=12)
+
+# res_map = (
+#     hill_plt
+#     * cont_plt.opts(colorbar=False)
+#     * (plt_manPTS*plt_res)
+#     * plt_labels.opts(size=36)
+#     ).opts(
+#         fontscale=1.5, fig_inches=12)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# %%[markdown]
+
+# ## Other misc snippets of old code
+
 
 # %%
 
@@ -1396,15 +2454,6 @@ kde_fig.savefig(fname=ROOT_DIR.joinpath(
 # export_svg(fig_supp2, ROOT_DIR.joinpath(
 #     'docs/Figures/oib-repeat/one2one_plts.svg'))
 # print('done with second plot')
-
-hv.save(data_map, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/data_map.png'))
-hv.save(elev_bar, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/elev_bar.png'))
-hv.save(res_map, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/res_map.png'))
-hv.save(fig_supp2, ROOT_DIR.joinpath(
-    'docs/Figures/oib-repeat/one2one_plts.png'))
 
 
 
