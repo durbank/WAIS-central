@@ -8,7 +8,7 @@ from scipy import signal
 import statsmodels.tsa.stattools as tsa
 from scipy.spatial.distance import pdist
 
-def trend_bs(df, nsim, df_err=pd.DataFrame()):
+def trend_bs(df, nsim, df_err=pd.DataFrame(), pval=False):
     """
     Dpc string goes here.
     """
@@ -18,7 +18,7 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     trends_bs = pd.DataFrame(columns=df.columns)
     intercepts = pd.DataFrame(columns=df.columns)
 
-    # In no errors exist, create neutral weights
+    # If no errors exist, create neutral weights
     if df_err.empty:
         df_err = pd.DataFrame(
             np.ones(df.shape), index=df.index, 
@@ -68,7 +68,44 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     trendCI_lb = np.nanpercentile(trends_bs, 2.5, axis=0)
     trendCI_ub = np.nanpercentile(trends_bs, 97.5, axis=0)
 
-    return trend_mu, intercept_mu, trendCI_lb, trendCI_ub
+    if pval:
+
+        tic = time.perf_counter()
+
+        # Generate null data
+        df_null = pd.DataFrame(
+            np.nan_to_num(signal.detrend(df, axis=0)), 
+            index=df.index)
+        
+        null_trends = pd.DataFrame(columns=df_null.columns)
+
+        # Generate null model estimates
+        for _ in range(nsim):
+
+            null_bs = df_null.sample(
+                len(df_null), replace=True).sort_index()
+            coeffs_null = np.polyfit(
+                null_bs.index, null_bs, 1)
+            null_trends = null_trends.append(
+                pd.Series(coeffs_null[0], 
+                index=df_null.columns), 
+                ignore_index=True)
+        
+        # Estimate p-values based on comparison to null models
+        pvals = np.zeros(len(trend_mu))
+        for i, mu in enumerate(trend_mu):
+
+            null_vals = null_trends.iloc[:,i]
+            pvals[i] = (abs(null_vals) >= abs(mu)).sum() \
+                / len(null_vals)
+
+        toc = time.perf_counter()
+        print(f"Execution time of null modeling: {toc-tic} s")
+
+        return trend_mu, intercept_mu, trendCI_lb, trendCI_ub, pvals
+
+    else:    
+        return trend_mu, intercept_mu, trendCI_lb, trendCI_ub
 
 # Function to perform autocorrelation
 def acf(df):
