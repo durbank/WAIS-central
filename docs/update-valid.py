@@ -23,7 +23,7 @@ import sys
 SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
 from my_mods import paipr, viz
-import my_mods.spat_ops as so
+from my_mods import spat_ops as so
 
 # %% Import and format radar data
 
