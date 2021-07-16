@@ -9,6 +9,8 @@ import geopandas as gpd
 from pathlib import Path
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
+import holoviews as hv
+hv.extension('bokeh', 'matplotlib')
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -20,18 +22,19 @@ ROOT_DIR = ROOT_DIR = Path(__file__).parents[1]
 import sys
 SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
-from my_functions import *
+from my_mods import paipr, viz
+import my_mods.spat_ops as so
 
 # %% Import and format radar data
 
 # Import and format PAIPR results
 dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109/')
-data_raw = import_PAIPR(dir1)
+data_raw = paipr.import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-paipr_data = format_PAIPR(
+paipr_data = paipr.format_PAIPR(
     data_0, start_yr=1980, end_yr=2010).drop(
     'elev', axis=1)
 paipr_ALL = paipr_data.pivot(
@@ -41,8 +44,8 @@ std_ALL = paipr_data.pivot(
 
 # Import and format manual results
 dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
-data_0 = import_PAIPR(dir_0)
-man_data = format_PAIPR(
+data_0 = paipr.import_PAIPR(dir_0)
+man_data = paipr.format_PAIPR(
     data_0, start_yr=1980, end_yr=2010).drop(
     'elev', axis=1)
 man_ALL = man_data.pivot(
@@ -52,9 +55,9 @@ manSTD_ALL = man_data.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_paipr = long2gdf(paipr_data)
+gdf_paipr = paipr.long2gdf(paipr_data)
 gdf_paipr.to_crs(epsg=3031, inplace=True)
-gdf_man = long2gdf(man_data)
+gdf_man = paipr.long2gdf(man_data)
 gdf_man.to_crs(epsg=3031, inplace=True)
 
 # Drop unwanted columns
@@ -137,7 +140,7 @@ gdf_man.query('Site != "Null"', inplace=True)
 
 # Find nearest neighbors between paipr and manual 
 # (within 250 m)
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_paipr, gdf_man, return_dist=True)
 idx_paipr = df_dist['distance'] <= 250
 dist_overlap = df_dist[idx_paipr]
@@ -166,135 +169,7 @@ gdf_radar = gpd.GeoDataFrame(
 
 # %%
 
-def plot_TScomp(
-    ts_df1, ts_df2, gdf_combo, ts_cores, labels, 
-    yaxis=True, xlims=None, ylims=None,
-    colors=['red', 'blue'], 
-    ts_err1=None, ts_err2=None):
-    """This is a function to generate matplotlib objects that compare spatially overlapping accumulation time series.
-
-    Args:
-        ts_df1 (pandas.DataFrame): Dataframe containing time series for the first dataset.
-        ts_df2 (pandas.DataFrame): Dataframe containing time series for the second dataset.
-        gdf_combo (geopandas.geoDataFrame): Geodataframe with entries corresponding to the paired time series locations. Also contains a column 'Site' that groups the different time series according to their manual tracing location.
-        labels (list of str): The labels used in the output plot to differentiate the time series dataframes.
-        colors (list, optional): The colors to use when plotting the time series. Defaults to ['blue', 'red'].
-        ts_err1 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df1. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
-        ts_err2 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df2. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
-
-    Returns:
-        matplotlib.pyplot.figure: Generated figure comparing the two overlapping time series.
-    """
-
-    # Remove observations without an assigned site
-    site_list = np.unique(gdf_combo['Site']).tolist()
-    if "Null" in site_list:
-        site_list.remove("Null")
-
-    # Generate figure with a row for each site
-    fig, axes = plt.subplots(
-        ncols=2, nrows=2, 
-        # ncols=1, nrows=len(site_list), 
-        constrained_layout=True, 
-        figsize=(21,12))
-        # figsize=(6,24))
-
-    for i, site in enumerate(site_list):
-        
-        # Subset results to specific site
-        idx = np.flatnonzero(gdf_combo['Site']==site)
-        df1 = ts_df1.iloc[:,idx]
-        df2 = ts_df2.iloc[:,idx]
-        df_core = ts_cores.loc[:,site]
-
-        # Plot core data
-        df_core.plot(
-            ax=fig.axes[i], color='black', linewidth=4, 
-            linestyle=':', label=labels[2])
-
-        # Check if errors for time series 1 are provided
-        if ts_err1 is not None:
-
-            df_err1 = ts_err1.iloc[:,idx]
-
-            # Plot ts1 and mean errors
-            df1.mean(axis=1).plot(
-                ax=fig.axes[i], color=colors[0], 
-                linewidth=4, label=labels[0])
-            (df1.mean(axis=1)+df_err1.mean(axis=1)).plot(
-                ax=fig.axes[i], color=colors[0], 
-                linestyle='--', label='__nolegend__')
-            (df1.mean(axis=1)-df_err1.mean(axis=1)).plot(
-                ax=fig.axes[i], color=colors[0], 
-                linestyle='--', label='__nolegend__')
-        else:
-            # If ts1 errors are not given, estimate as the 
-            # standard deviation of annual estimates
-            df1.mean(axis=1).plot(
-                ax=fig.axes[i], color=colors[0], 
-                linewidth=4, label=labels[0])
-            (df1.mean(axis=1)+df1.std(axis=1)).plot(
-                ax=fig.axes[i], color=colors[0], 
-                linestyle='--', label='__nolegend__')
-            (df1.mean(axis=1)-df1.std(axis=1)).plot(
-                ax=fig.axes[i], color=colors[0], 
-                linestyle='--', label='__nolegend__')
-
-        # Check if errors for time series 2 are provided
-        if ts_err2 is not None:
-            df_err2 = ts_err2.iloc[:,idx]
-
-            # Plot ts2 and mean errors
-            df2.mean(axis=1).plot(
-                ax=fig.axes[i], color=colors[1], 
-                linewidth=2, label=labels[1])
-            (df2.mean(axis=1)+df_err2.mean(axis=1)).plot(
-                ax=fig.axes[i], color=colors[1], 
-                linestyle='--', label='__nolegend__')
-            (df2.mean(axis=1)-df_err2.mean(axis=1)).plot(
-                ax=fig.axes[i], color=colors[1], 
-                linestyle='--', label='__nolegend__')
-        else:
-            # If ts2 errors are not given, estimate as the 
-            # standard deviation of annual estimates
-            df2.mean(axis=1).plot(
-                ax=fig.axes[i], color=colors[1], 
-                linewidth=2, label=labels[1])
-            (df2.mean(axis=1)+df2.std(axis=1)).plot(
-                ax=fig.axes[i], color=colors[1], 
-                linestyle='--', label='__nolegend__')
-            (df2.mean(axis=1)-df2.std(axis=1)).plot(
-                ax=fig.axes[i], color=colors[1], 
-                linestyle='--', label='__nolegend__')
-
-
-
-        if xlims:
-            fig.axes[i].set_xlim(xlims)
-        if ylims:
-            fig.axes[i].set_ylim(ylims)
-
-        # Add legend and set title based on site name
-        fig.axes[i].grid(True)
-        fig.axes[i].legend()
-        fig.axes[i].set_title('Site '+site+' time series')
-
-        if not yaxis:
-            fig.axes[i].set_yticklabels([])
-        else:
-            fig.axes[i].set_ylabel('Accum (mm/a)')
-
-        # if i==(len(site_list)-1):
-        #     pass
-        # else:
-        #     axes[i].set_xticklabels([])
-        #     axes[i].set_xlabel(None)
-
-    return fig
-
-
-
-tsfig = plot_TScomp(
+tsfig = viz.plot_TScomp(
     ts_df1=accum_paipr, ts_df2=accum_man, 
     gdf_combo=gdf_radar, ts_cores=accum_cores,
     yaxis=True, xlims=[1980, 2010], ylims=[80, 700],
@@ -329,9 +204,6 @@ print(f"PAIPR-core: {100*np.sqrt(((PC_res/cores_rep.values)**2).values.mean()):.
 print(f"manual-core: {100*np.sqrt(((MC_res/cores_rep.values)**2).values.mean()):.0f}%")
 
 # %%
-
-import holoviews as hv
-hv.extension('bokeh', 'matplotlib')
 
 # Create dataframes for scatter plots
 df_radar = pd.DataFrame(
@@ -403,7 +275,7 @@ one2one_plts = (
 
 # Find nearest neighbors between paipr and manual 
 # (within 500 m)
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_cores, gdf_paipr, return_dist=True)
 idx_paipr = df_dist['distance'] <= 6000
 dist_overlap = df_dist[idx_paipr]

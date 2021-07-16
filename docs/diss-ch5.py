@@ -13,10 +13,9 @@ import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
 from shapely.geometry import Point, Polygon
-# from bokeh.io import output_notebook
-# output_notebook()
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
+from scipy import signal
 
 # Set project root directory
 ROOT_DIR = Path('/home/durbank/Documents/Research/Antarctica/WAIS-central/')
@@ -28,7 +27,8 @@ DATA_DIR = ROOT_DIR.joinpath('data')
 import sys
 SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
-from my_functions import *
+from my_mods import paipr, stats
+import my_mods.spat_ops as so
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -108,7 +108,7 @@ data_list = [
     DATA_DIR.joinpath('PAIPR-outputs').glob('*')]
 data_raw = pd.DataFrame()
 for folder in data_list:
-    data = import_PAIPR(folder)
+    data = paipr.import_PAIPR(folder)
     data_raw = data_raw.append(data)
 
 # Remove results for below QC data reliability
@@ -118,7 +118,7 @@ data_0 = data_raw.query(
     ['collect_time', 'Year']).reset_index(drop=True)
 
 # Format and sort results for further processing
-data_form = format_PAIPR(data_0)
+data_form = paipr.format_PAIPR(data_0)
 
 # Create time series arrays for annual accumulation 
 # and error
@@ -129,16 +129,16 @@ std_ALL = data_form.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_traces = long2gdf(data_form)
+gdf_traces = paipr.long2gdf(data_form)
 gdf_traces.to_crs(epsg=3031, inplace=True)
 
 # %% PAIPR data aggregation by grid
 
 # Combine trace time series based on grid cells
 grid_res = 1000
-tmp_grids = pts2grid(gdf_traces, resolution=grid_res)
+tmp_grids = so.pts2grid(gdf_traces, resolution=grid_res)
 (gdf_grid_ALL, accum_grid_ALL, 
-    MoE_grid_ALL, yr_count_ALL) = trace_combine(
+    MoE_grid_ALL, yr_count_ALL) = so.trace_combine(
     tmp_grids, accum_ALL, std_ALL)
 
 # %% Subset results to standard time period

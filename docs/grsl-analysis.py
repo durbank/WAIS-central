@@ -12,17 +12,12 @@ import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
 from shapely.geometry import Point
-# from bokeh.io import output_notebook
-# output_notebook()
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
-# hv.extension('matplotlib')
-# gv.extension('matplotlib')
 import panel as pn
 import seaborn as sns
 import xarray as xr
 from xrspatial import hillshade
-from scipy.spatial.distance import pdist
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -34,7 +29,8 @@ ROOT_DIR = Path(__file__).parents[1]
 import sys
 SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
-from my_functions import *
+from my_mods import paipr, rema, viz, stats
+import my_mods.spat_ops as so
 
 # %%[markdown]
 # ## Data and Study Site
@@ -43,12 +39,12 @@ from my_functions import *
 
 # Import 20111109 results
 dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
-data_raw = import_PAIPR(dir1)
+data_raw = paipr.import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-data_2011 = format_PAIPR(
+data_2011 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2011_ALL = data_2011.pivot(
@@ -58,12 +54,12 @@ std2011_ALL = data_2011.pivot(
 
 # Import 20161109 results
 dir2 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
-data_raw = import_PAIPR(dir2)
+data_raw = paipr.import_PAIPR(dir2)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-data_2016 = format_PAIPR(
+data_2016 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2016_ALL = data_2016.pivot(
@@ -73,16 +69,16 @@ std2016_ALL = data_2016.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_2011 = long2gdf(data_2011)
+gdf_2011 = paipr.long2gdf(data_2011)
 gdf_2011.to_crs(epsg=3031, inplace=True)
-gdf_2016 = long2gdf(data_2016)
+gdf_2016 = paipr.long2gdf(data_2016)
 gdf_2016.to_crs(epsg=3031, inplace=True)
 
 # %% Determine overlap between datasets
 
 # Find nearest neighbors between 2011 and 2016 
 # (within 500 m)
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_2011, gdf_2016, return_dist=True)
 idx_paipr = df_dist['distance'] <= 500
 dist_overlap = df_dist[idx_paipr]
@@ -256,7 +252,7 @@ xr_clip = xr_vice.sel(
     y=slice(
         gdf_PAIPR.total_bounds[3], 
         gdf_PAIPR.total_bounds[1]))
-xr_pts = extract_at_pts(
+xr_pts = so.extract_at_pts(
     xr_clip, gdf_PAIPR.copy(), return_dist=True)
 vice_pts = gpd.GeoDataFrame(
     data=xr_pts[['VX', 'VY']], crs='epsg:3031', 
@@ -402,12 +398,12 @@ paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 
 # Import and format PAIPR results
 dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
-data_raw = import_PAIPR(dir1)
+data_raw = paipr.import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-data_2011 = format_PAIPR(
+data_2011 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2011_ALL = data_2011.pivot(
@@ -418,8 +414,8 @@ std2011_ALL = data_2011.pivot(
 # Import and format manual results
 dir_0 = ROOT_DIR.joinpath(
     'data/PAIPR-repeat/20111109/smb-manual/')
-data_0 = import_PAIPR(dir_0)
-man_2011 = format_PAIPR(
+data_0 = paipr.import_PAIPR(dir_0)
+man_2011 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 man2011_ALL = man_2011.pivot(
@@ -429,14 +425,14 @@ manSTD_2011_ALL = man_2011.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_2011 = long2gdf(data_2011)
+gdf_2011 = paipr.long2gdf(data_2011)
 gdf_2011.to_crs(epsg=3031, inplace=True)
-gdf_man2011 = long2gdf(man_2011)
+gdf_man2011 = paipr.long2gdf(man_2011)
 gdf_man2011.to_crs(epsg=3031, inplace=True)
 
 # %% Subset to overlapping data
 
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_man2011, gdf_2011, return_dist=True)
 idx_2011 = df_dist['distance'] <= 500
 dist_overlap1 = df_dist[idx_2011]
@@ -469,125 +465,6 @@ accum_bar = np.mean(
     axis=0)
 res2011_perc = 100*(res_2011 / accum_bar)
 
-# %%
-
-plt.rcParams.update({'font.size': 24})
-
-def plot_TScomp(
-    ts_df1, ts_df2, gdf_combo, labels, 
-    yaxis=True, xlims=None, ylims=None,
-    colors=['blue', 'red'], ts_err1=None, ts_err2=None):
-    """This is a function to generate matplotlib objects that compare spatially overlapping accumulation time series.
-
-    Args:
-        ts_df1 (pandas.DataFrame): Dataframe containing time series for the first dataset.
-        ts_df2 (pandas.DataFrame): Dataframe containing time series for the second dataset.
-        gdf_combo (geopandas.geoDataFrame): Geodataframe with entries corresponding to the paired time series locations. Also contains a column 'Site' that groups the different time series according to their manual tracing location.
-        labels (list of str): The labels used in the output plot to differentiate the time series dataframes.
-        colors (list, optional): The colors to use when plotting the time series. Defaults to ['blue', 'red'].
-        ts_err1 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df1. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
-        ts_err2 (pandas.DataFrame, optional): DataFrame containing time series errors corresponding to ts_df2. If "None" then the error is estimated from the standard deviations in annual results. Defaults to None.
-
-    Returns:
-        matplotlib.pyplot.figure: Generated figure comparing the two overlapping time series.
-    """
-
-    # Remove observations without an assigned site
-    site_list = np.unique(gdf_combo['Site']).tolist()
-    if "Null" in site_list:
-        site_list.remove("Null")
-
-    # Generate figure with a row for each site
-    fig, axes = plt.subplots(
-        ncols=1, nrows=len(site_list), 
-        constrained_layout=True, 
-        figsize=(6,24))
-
-    for i, site in enumerate(site_list):
-        
-        # Subset results to specific site
-        idx = np.flatnonzero(gdf_combo['Site']==site)
-        df1 = ts_df1.iloc[:,idx]
-        df2 = ts_df2.iloc[:,idx]
-
-        # Check if errors for time series 1 are provided
-        if ts_err1 is not None:
-
-            df_err1 = ts_err1.iloc[:,idx]
-
-            # Plot ts1 and mean errors
-            df1.mean(axis=1).plot(ax=axes[i], color=colors[0], 
-                linewidth=2, label=labels[0])
-            (df1.mean(axis=1)+df_err1.mean(axis=1)).plot(
-                ax=axes[i], color=colors[0], linestyle='--', 
-                label='__nolegend__')
-            (df1.mean(axis=1)-df_err1.mean(axis=1)).plot(
-                ax=axes[i], color=colors[0], linestyle='--', 
-                label='__nolegend__')
-        else:
-            # If ts1 errors are not given, estimate as the 
-            # standard deviation of annual estimates
-            df1.mean(axis=1).plot(ax=axes[i], color=colors[0], 
-                linewidth=2, label=labels[0])
-            (df1.mean(axis=1)+df1.std(axis=1)).plot(
-                ax=axes[i], color=colors[0], linestyle='--', 
-                label='__nolegend__')
-            (df1.mean(axis=1)-df1.std(axis=1)).plot(
-                ax=axes[i], color=colors[0], linestyle='--', 
-                label='__nolegend__')
-
-        # Check if errors for time series 2 are provided
-        if ts_err2 is not None:
-            df_err2 = ts_err2.iloc[:,idx]
-
-            # Plot ts2 and mean errors
-            df2.mean(axis=1).plot(
-                ax=axes[i], color=colors[1], linewidth=2, 
-                label=labels[1])
-            (df2.mean(axis=1)+df_err2.mean(axis=1)).plot(
-                ax=axes[i], color=colors[1], linestyle='--', 
-                label='__nolegend__')
-            (df2.mean(axis=1)-df_err2.mean(axis=1)).plot(
-                ax=axes[i], color=colors[1], linestyle='--', 
-                label='__nolegend__')
-        else:
-            # If ts2 errors are not given, estimate as the 
-            # standard deviation of annual estimates
-            df2.mean(axis=1).plot(
-                ax=axes[i], color=colors[1], linewidth=2, 
-                label=labels[1])
-            (df2.mean(axis=1)+df2.std(axis=1)).plot(
-                ax=axes[i], color=colors[1], linestyle='--', 
-                label='__nolegend__')
-            (df2.mean(axis=1)-df2.std(axis=1)).plot(
-                ax=axes[i], color=colors[1], linestyle='--', 
-                label='__nolegend__')
-        
-        if xlims:
-            axes[i].set_xlim(xlims)
-        if ylims:
-            axes[i].set_ylim(ylims)
-
-        # Add legend and set title based on site name
-        axes[i].grid(True)
-
-        if i == 0:
-            axes[i].legend()
-        # axes[i].set_title('Site '+site+' time series')
-
-        if not yaxis:
-            axes[i].set_yticklabels([])
-        else:
-            axes[i].set_ylabel('Accum (mm/a)')
-
-        if i==(len(site_list)-1):
-            pass
-        else:
-            axes[i].set_xticklabels([])
-            axes[i].set_xlabel(None)
-
-    return fig
-
 # %% 2011 comparison plots
 
 # Generate indices corresponding to desired sites
@@ -606,7 +483,8 @@ for label in chunk_centers['Site']:
     gdf_traces2011['Site'][idx] = label
 
 
-tsfig_2011 = plot_TScomp(
+plt.rcParams.update({'font.size': 24})
+tsfig_2011 = viz.plot_TScomp(
     man2011_accum, Maccum_2011, gdf_traces2011, 
     yaxis=False, xlims=[1990, 2010], ylims=[80, 700],
     labels=['2011 manual', '2011 PAIPR'], 
@@ -643,12 +521,12 @@ tmp_df1['flight'] = 2011
 
 # Import and format PAIPR results
 dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
-data_raw = import_PAIPR(dir1)
+data_raw = paipr.import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-data_2016 = format_PAIPR(
+data_2016 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2016_ALL = data_2016.pivot(
@@ -659,8 +537,8 @@ std2016_ALL = data_2016.pivot(
 # Import and format manual results
 dir_0 = ROOT_DIR.joinpath(
     'data/PAIPR-repeat/20161109/smb-manual/')
-data_0 = import_PAIPR(dir_0)
-man_2016 = format_PAIPR(
+data_0 = paipr.import_PAIPR(dir_0)
+man_2016 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 man2016_ALL = man_2016.pivot(
@@ -670,14 +548,14 @@ manSTD_2016_ALL = man_2016.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_2016 = long2gdf(data_2016)
+gdf_2016 = paipr.long2gdf(data_2016)
 gdf_2016.to_crs(epsg=3031, inplace=True)
-gdf_man2016 = long2gdf(man_2016)
+gdf_man2016 = paipr.long2gdf(man_2016)
 gdf_man2016.to_crs(epsg=3031, inplace=True)
 
 # %%
 
-df_dist2 = nearest_neighbor(
+df_dist2 = so.nearest_neighbor(
     gdf_man2016, gdf_2016, return_dist=True)
 idx_2016 = df_dist2['distance'] <= 500
 dist_overlap2 = df_dist2[idx_2016]
@@ -727,7 +605,7 @@ for label in chunk_centers['Site']:
     gdf_traces2016['Site'][idx] = label
 
 
-tsfig_2016 = plot_TScomp(
+tsfig_2016 = viz.plot_TScomp(
     man2016_accum, Maccum_2016, gdf_traces2016, 
     yaxis=False, xlims=[1990,2010], ylims=[80,700],
     labels=['2016 manual', '2016 PAIPR'], 
@@ -809,8 +687,8 @@ PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
 # Get list of 2011 manual files
 dir_0 = ROOT_DIR.joinpath(
     'data/PAIPR-repeat/20111109/smb-manual/')
-data_0 = import_PAIPR(dir_0)
-man_2011 = format_PAIPR(
+data_0 = paipr.import_PAIPR(dir_0)
+man_2011 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 man2011_ALL = man_2011.pivot(
@@ -820,14 +698,14 @@ manSTD_2011_ALL = man_2011.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_man2011 = long2gdf(man_2011)
+gdf_man2011 = paipr.long2gdf(man_2011)
 gdf_man2011.to_crs(epsg=3031, inplace=True)
 
 # Perform same for 2016 manual results
 dir_0 = ROOT_DIR.joinpath(
     'data/PAIPR-repeat/20161109/smb-manual/')
-data_0 = import_PAIPR(dir_0)
-man_2016 = format_PAIPR(
+data_0 = paipr.import_PAIPR(dir_0)
+man_2016 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 man2016_ALL = man_2016.pivot(
@@ -837,12 +715,12 @@ manSTD_2016_ALL = man_2016.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_man2016 = long2gdf(man_2016)
+gdf_man2016 = paipr.long2gdf(man_2016)
 gdf_man2016.to_crs(epsg=3031, inplace=True)
 
 # %% Subset manual results to overlapping sections
 
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_man2016, gdf_man2011, return_dist=True)
 idx_2016 = df_dist['distance'] <= 500
 dist_overlap = df_dist[idx_2016]
@@ -883,7 +761,7 @@ for label in chunk_centers['Site']:
     gdf_MANtraces['Site'][idx] = label
 
 
-tsfig_manual = plot_TScomp(
+tsfig_manual = viz.plot_TScomp(
     accum_man2011, accum_man2016, gdf_MANtraces, 
     yaxis=False, xlims=[1990,2010], ylims=[80,700],
     labels=['2011 manual', '2016 manual'])
@@ -978,7 +856,7 @@ man_1to1_comb_plt = man_1to1_plt + site_res_plt
 
 # %%
 
-tsfig_PAIPR = plot_TScomp(
+tsfig_PAIPR = viz.plot_TScomp(
     accum_2011, accum_2016, gdf_PAIPR, 
     yaxis=True, xlims=[1990,2010], ylims=[80,700],
     labels=['2011 PAIPR', '2016 PAIPR'], 
@@ -990,87 +868,10 @@ tsfig_PAIPR = plot_TScomp(
 # %%[markdown]
 # ## Investigations of spatial variability
 #  
-# %% Spatial coherence and variability
-
-def vario(
-    points_gdf, lag_size, 
-    d_metric='euclidean', vars='all', 
-    stationarize=False, scale=True):
-    """A function to calculate the experimental variogram for values associated with a geoDataFrame of points.
-
-    Args:
-        points_gdf (geopandas.geodataframe.GeoDataFrame): Location of points and values associated with those points to use for calculating distances and lagged semivariance.
-        lag_size (int): The size of the lagging interval to use for binning semivariance values.
-        d_metric (str, optional): The distance metric to use when calculating pairwise distances in the geoDataFrame. Defaults to 'euclidean'.
-        vars (list of str, optional): The names of variables to use when calculating semivariance. Defaults to 'all'.
-        scale (bool, optional): Whether to perform normalization (relative to max value) on semivariance values. Defaults to True.
-
-    Returns:
-        pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
-    """
-
-    # Get column names if 'all' is selected for "vars"
-    if vars == "all":
-        vars = points_gdf.drop(
-            columns='geometry').columns
-
-    # Extact trace coordinates and calculate pairwise distance
-    locs_arr = np.array(
-        [points_gdf.geometry.x, points_gdf.geometry.y]).T
-    dist_arr = pdist(locs_arr, metric=d_metric)
-
-    # Calculate the indices used for each pairwise calculation
-    i_idx = np.empty(dist_arr.shape)
-    j_idx = np.empty(dist_arr.shape)
-    m = locs_arr.shape[0]
-    for i in range(m):
-        for j in range(m):
-            if i < j < m:
-                i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
-                j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
-
-
-    if stationarize:
-        pass
-    
-    # Create dfs for paired-point values
-    i_vals = points_gdf[vars].iloc[i_idx].reset_index(
-        drop=True)
-    j_vals = points_gdf[vars].iloc[j_idx].reset_index(
-        drop=True)
-
-    # Calculate squared difference bewteen variable values
-    sqdiff_df = (i_vals - j_vals)**2
-    sqdiff_df['dist'] = dist_arr
-
-    # Create array of lag interval endpoints
-    d_max = lag_size * (dist_arr.max() // lag_size + 1)
-    lags = np.arange(0,d_max+1,lag_size)
-
-    # Group variables based on lagged distance intervals
-    df_groups = sqdiff_df.groupby(
-        pd.cut(sqdiff_df['dist'], lags))
-
-    # Calculate semivariance at each lag for each variable
-    gamma_vals = (1/2)*df_groups[vars].mean()
-    gamma_vals.index.name = 'lag'
-
-    if scale:
-        gamma_df = gamma_vals / gamma_vals.max()
-    else:
-        gamma_df = gamma_vals
-
-    # Add distance, lag center, and count values to output
-    gamma_df['dist'] = df_groups['dist'].mean()
-    gamma_df['lag_cent'] = lags[1::]-lag_size//2
-    gamma_df['cnt'] = df_groups['dist'].count()
-
-    return gamma_df
-
 # %%
 
 # Calculate variogram for PAIPR results
-gamma_df = vario(
+gamma_df = stats.vario(
     gdf_PAIPR, lag_size=200, vars=['accum_mu', 'accum_res'], 
     scale=True)
 
@@ -1087,7 +888,7 @@ gdf_noise['accum_res'] = np.random.normal(
     size=gdf_noise.shape[0])
 
 # Calculate variogram for random noise results
-gamma_noise = vario(
+gamma_noise = stats.vario(
     gdf_noise, lag_size=200, vars=['accum_mu', 'accum_res'], 
     scale=True)
 
@@ -1135,7 +936,7 @@ dem_index = (
 # Find and download missing REMA DSM tiles
 tiles_list = pd.DataFrame(
     dem_index.drop(columns='geometry'))
-get_REMA(tiles_list, REMA_DIR.joinpath('tiles_8m_v1.1'))
+rema.get_REMA(tiles_list, REMA_DIR.joinpath('tiles_8m_v1.1'))
 
 # %% Calculate slope/aspect for all REMA tiles
 
@@ -1146,7 +947,7 @@ dem_list = [
     if any(tile in str(path) for tile in dem_index.tile)]
 
 # Calculate slope and aspect for each DEM (only ones not already present)
-[calc_topo(dem) for dem in dem_list]
+[rema.calc_topo(dem) for dem in dem_list]
 
 # %% Extract topo values and add to PAIPR gdf
 
@@ -1154,7 +955,7 @@ dem_list = [
 # location
 tif_dirs = [path.parent for path in dem_list]
 for path in tif_dirs:
-    gdf_PAIPR = topo_vals(
+    gdf_PAIPR = rema.topo_vals(
         path, gdf_PAIPR, slope=True, aspect=True)
 
 # Set elev/slope/aspect to NaN for locations where elev<0
@@ -1169,80 +970,11 @@ gdf_PAIPR.loc[gdf_PAIPR['slope']<0,'aspect'] = np.nan
 
 # %% Extract flight parameters
 
-def get_FlightData(flight_dir):
-    """Function to extract OIB flight parameter data from .nc files and convert to geodataframe.
-
-    Args:
-        flight_dir (pathlib.PosixPath): The directory containing the .nc OIB files to extract and convert.
-
-    Returns:
-        geopandas.geodataframe.GeoDataFrame: Table of OIB flight parameters (altitude, heading, lat, lon, pitch, and roll) with their corresponding surface location and collection time.
-    """
-    # List of files to extract from
-    nc_files = [file for file in flight_dir.glob('*.nc')]
-    
-    # Load as xarray dataset
-    xr_flight = xr.open_dataset(
-        nc_files.pop(0))[[
-            'altitude', 'heading', 'lat', 
-            'lon', 'pitch','roll']]
-
-    # Concatenate data from all flights in directory
-    for file in nc_files:
-
-        flight_i = xr.open_dataset(file)[[
-            'altitude', 'heading', 'lat', 
-            'lon', 'pitch','roll']]
-        xr_flight = xr.concat(
-            [xr_flight, flight_i], dim='time')
-
-    # Convert to dataframe and average values to ~200 m resolution
-    flight_data = xr_flight.to_dataframe()
-    flight_coarse = flight_data.rolling(
-        window=40, min_periods=1).mean().iloc[0::40]
-
-    # Convert to geodataframe in Antarctic coordinates
-    gdf_flight = gpd.GeoDataFrame(
-        data=flight_coarse.drop(columns=['lat', 'lon']), 
-        geometry=gpd.points_from_xy(
-            flight_coarse.lon, flight_coarse.lat), 
-        crs='EPSG:4326').reset_index().to_crs(epsg=3031)
-
-    return gdf_flight
-
-
-def path_dist(locs):
-    """Function to calculate the cummulative distance between points along a given path.
-
-    Args:
-        locs (numpy.ndarray): 2D array of points along the path to calculate distance.
-    """
-    # Preallocate array for distances between adjacent points
-    dist_seg = np.empty(locs.shape[0])
-
-    # Calculate the distances bewteen adjacent points in array
-    for i in range(locs.shape[0]):
-        if i == 0:
-            dist_seg[i] = 0
-        else:
-            pos_0 = locs[i-1]
-            pos = locs[i]
-            dist_seg[i] = np.sqrt(
-                (pos[0] - pos_0[0])**2 
-                + (pos[1] - pos_0[1])**2)
-
-    # Find cummulative path distance along given array
-    dist_cum = np.cumsum(dist_seg)
-
-    return dist_cum
-
-#%%
-
 # # Assign OIB flight data directory
 # OIB_DIR = Path(
 #     '/media/durbank/WARP/Research/Antarctica/Data/IceBridge/WAIS-central')
-# gdf_flight2011 = get_FlightData(OIB_DIR.joinpath('20111109'))
-# gdf_flight2016 = get_FlightData(OIB_DIR.joinpath('20161109'))
+# gdf_flight2011 = paipr.get_FlightData(OIB_DIR.joinpath('20111109'))
+# gdf_flight2016 = paipr.get_FlightData(OIB_DIR.joinpath('20161109'))
 
 # # Save data for future use (cuts repetative computation time)
 # gdf_flight2011.to_file(
@@ -1267,7 +999,7 @@ gdf_flight2016 = gpd.read_file(
 # %% Add intersecting flight parameter data to PAIPR gdf
 
 # Find nearest neighbors between gdf_PAIPR and gdf_flight2011
-dist_2011 = pd.DataFrame(nearest_neighbor(
+dist_2011 = pd.DataFrame(so.nearest_neighbor(
     gdf_PAIPR, gdf_flight2011, 
     return_dist=True).drop(
         columns=['time', 'geometry'])).add_suffix('_res')
@@ -1279,7 +1011,7 @@ dist_2011['plane_elev'] = dist_2011['altitude_res']-gdf_PAIPR['elev']
 # gdf_PAIPR = gdf_PAIPR.join(dist_2011)
 
 # Find nearest neighbors between gdf_PAIPR and gdf_flight2016
-dist_2016 = pd.DataFrame(nearest_neighbor(
+dist_2016 = pd.DataFrame(so.nearest_neighbor(
     gdf_PAIPR, gdf_flight2016, 
     return_dist=True).drop(
         columns=['time', 'geometry'])).add_suffix('_res')
@@ -1405,7 +1137,7 @@ ax1.set_xlabel('% Bias')
 
 # %% Paired t tests for PAIPR
 
-from scipy import stats
+from scipy import stats as sci_stats
 
 val_bias = []
 t_stat = []
@@ -1417,12 +1149,12 @@ for site in np.unique(PAIPR_df.Site):
     data_i = PAIPR_df.query('Site == @site')
     SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
     t_i = abs(data_i['res_perc'].mean()/SE_i)
-    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+    crit_i = sci_stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
 
     val_bias.append(data_i['res_perc'].mean())
     t_stat.append(t_i)
     t_crit.append(crit_i)
-    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    p_val.append(2*(1-sci_stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
     moe_val.append(crit_i*SE_i)
 
     print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
@@ -1431,8 +1163,6 @@ print(p_val)
 print('As all p-vals are 0, for all sites 2011 results are statistically different from 2016 results :(')
 
 # %% Paired t tests for PAIPR (averaged by year)
-
-from scipy import stats
 
 val_bias = []
 t_stat = []
@@ -1444,12 +1174,12 @@ for site in np.unique(PAIPR_df.Site):
     data_i = PAIPR_df.query('Site == @site').groupby('Year').mean()
     SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
     t_i = abs(data_i['res_perc'].mean()/SE_i)
-    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+    crit_i = sci_stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
 
     val_bias.append(data_i['res_perc'].mean())
     t_stat.append(t_i)
     t_crit.append(crit_i)
-    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    p_val.append(2*(1-sci_stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
     moe_val.append(crit_i*SE_i)
 
     print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
@@ -1457,8 +1187,6 @@ for site in np.unique(PAIPR_df.Site):
 print(p_val)
 
 # %% Paired t tests for manual
-
-from scipy import stats
 
 val_bias = []
 t_stat = []
@@ -1470,12 +1198,12 @@ for site in np.unique(man_df.Site):
     data_i = man_df.query('Site == @site')
     SE_i = data_i['res_perc'].std()/np.sqrt(data_i.shape[0])
     t_i = abs(data_i['res_perc'].mean()/SE_i)
-    crit_i = stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
+    crit_i = sci_stats.t.ppf(q=0.995, df=data_i.shape[0]-1)
 
     val_bias.append(data_i['res_perc'].mean())
     t_stat.append(t_i)
     t_crit.append(crit_i)
-    p_val.append(2*(1-stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
+    p_val.append(2*(1-sci_stats.t.cdf(x=t_i, df=data_i.shape[0]-1)))
     moe_val.append(crit_i*SE_i)
 
     print(f"For Site {site}, the mean bias is {data_i['res_perc'].mean():.1f}(+/-){crit_i*SE_i:.2f}")
@@ -1664,146 +1392,12 @@ print(
 
 # %%
 
-def panels_121(
-    datum, 
-    x_vars=[
-        'accum_2011','accum_2011','accum_man','accum_man'],
-    y_vars=[
-        'accum_2016','accum_2016','accum_paipr','accum_paipr'],
-    TOP=False, BOTTOM=False, xlabels=None, ylabels=None, 
-    kde_colors=['#d55e00', '#cc79a7', '#0072b2', '#009e73'],
-    kde_labels=[
-        '2016-2011 PAIPR', '2016-2011 manual', 
-        '2011 PAIPR-manual', '2016 PAIPR-manual'], 
-    plot_min=None, plot_max=None, size=500):
-    """A function to generate a Holoviews Layout consisting of 1:1 plots of the given datum, with a kernel density plot also showing the residuals between the given x and y variables.
-
-    Args:
-        datum (list of pandas.DataFrame): First data group to include for generating plots. Variables in dataframe must include an x-variable, a y-variable, and a 'Year' variable.
-        x_vars (list of str, optional): The names of the x-variables included in the datum. Defaults to [ 'accum_2011','accum_2011','accum_man','accum_man'].
-        y_vars (list of str, optional): The names of the y-variables included in the datum.. Defaults to [ 'accum_2016','accum_2016','accum_paipr','accum_paipr'].
-        TOP (bool, optional): Whether the returned Layout will be at the top of a Layout stack. Defaults to False.
-        BOTTOM (bool, optional): Whether the returned Layout will be at the bottom of a Layout stack. Defaults to False.
-        xlabels ([type], optional): List of strings to use as the x-labels for the 1:1 plots. Defaults to None.
-        ylabels (list, optional): List of strings to use as the y-labels for the 1:1 plots. Defaults to None.
-        kde_colors (list, optional): List of colors to use in kde plots. Defaults to ['blue', 'red', 'purple', 'orange'].
-        kde_labels (list, optional): List of labels to use in kde plots. Defaults to [ '2016-2011 PAIPR', '2016-2011 manual', '2011 PAIPR-manual', '2016 PAIPR-manual'].
-        plot_min (float, optional): Specify a lower bound to the generated plots. Defaults to None.
-        plot_max (float, optional): Specifies an upper bound to the generated plots. Defaults to None.
-        size (int, optional): The output size (both width and height) in pixels of individual subplots in the Layout panel. Defaults to 500.
-        # font_scaler (float, optional): How much to scale the generated plot text. Defaults to no additional scaling.
-
-    Returns:
-        holoviews.core.layout.Layout: Figure Layout consisting of multiple 1:1 subplots and a subplot with kernel density estimates of the residuals of the various datum.
-    """
-
-    # Preallocate subplot lists
-    one2one_plts = []
-    kde_plots = []
-    if xlabels is None:
-        xlabels = np.repeat(None, len(datum))
-    if ylabels is None:
-        ylabels = np.repeat(None, len(datum))
-
-    for i, data in enumerate(datum):
-
-        # Get names of x-y variables for plotting
-        x_var = x_vars[i]
-        y_var = y_vars[i]
-
-        # Get global axis bounds and generate 1:1 line
-        if plot_min is None:
-            plot_min = np.min(
-                [data[x_var].min(), data[y_var].min()])
-        if plot_max is None:
-            plot_max = np.max(
-                [data[x_var].max(), data[y_var].max()])
-        one2one_line = hv.Curve(data=pd.DataFrame(
-            {'x':[plot_min, plot_max], 
-            'y':[plot_min, plot_max]})).opts(color='black')
-
-        # Generate 1:1 scatter plot, gradated by year
-        scatt_yr = hv.Points(
-            data=data, kdims=[x_var, y_var], 
-            vdims=['Year']).opts(
-                xlim=(plot_min, plot_max), 
-                ylim=(plot_min, plot_max), 
-                xlabel=xlabels[i], 
-                ylabel=ylabels[i], 
-                color='Year', cmap='Category20b', colorbar=False)
-        scatt_yr.opts(
-            labelled=[], show_grid=True, xaxis=None, yaxis=None)
-
-        # Special formatting given position of subplot in figure
-        if i==0:
-            scatt_yr.opts(yaxis='left')
-            # scatt_yr.opts(ylabel='Annual accum (mm/yr)')
-        if i==len(datum)-1:
-            scatt_yr.opts(colorbar=True)
-        if TOP:
-            scatt_yr.opts(xaxis='top')
-        if BOTTOM:
-            scatt_yr.opts(xaxis='bottom')
-
-        # Combine 1:1 line and scatter plot and add to plot list
-        one2one_plt = (one2one_line * scatt_yr).opts(
-            width=size, height=size, 
-            # fontscale=3,
-            fontsize={'ticks':20, 'xticks':30, 'yticks':30}, 
-            xrotation=90, 
-            xticks=4, yticks=4)
-        if i==len(datum)-1:
-            one2one_plt.opts(width=int(size+0.10*size))
-        one2one_plts.append(one2one_plt)
-
-        # Generate kde for residuals of given estimates and 
-        # add to plot list 
-        kde_data = (
-            100*(data[y_var]-data[x_var]) 
-            / data[[x_var, y_var]].mean(axis=1))
-        kde_plot = hv.Distribution(
-            kde_data, label=kde_labels[i]).opts(
-            filled=False, line_color=kde_colors[i], 
-            line_width=5)
-        kde_plots.append(kde_plot)
-
-    # Generate and decorate combined density subplot
-    fig_kde = (
-        kde_plots[0] * kde_plots[1] 
-        * kde_plots[2] * kde_plots[3]).opts(
-            xaxis=None, yaxis=None, 
-            width=size, height=size, show_grid=True
-        )
-    
-    # Specific formatting based on subplot position
-    if TOP:
-        fig_kde = fig_kde.opts(
-            xaxis='top', xlabel='% Bias', xrotation=90, 
-            fontsize={'legend':25, 'xticks':18, 'xlabel':22})
-    elif BOTTOM:
-        fig_kde = fig_kde.opts(
-            xaxis='bottom', xlabel='% Bias', xrotation=90,
-            fontsize={'legend':25, 'xticks':18, 'xlabel':22})
-    else:
-        fig_kde = fig_kde.opts(show_legend=False)
-
-
-    # Generate final panel Layout with 1:1 and kde plots
-    fig_layout = hv.Layout(
-        one2one_plts[0] + one2one_plts[1] 
-        + one2one_plts[2] + one2one_plts[3] 
-        + fig_kde).cols(5)
-    
-    return fig_layout
-
-# %%
-
 # Preallocate Layout list
 figs_supp2 = []
 
 # Add full dataset Layout to Layout list
 figs_supp2.append(
-    panels_121(
+    viz.panels_121(
         datum=[PAIPR_df, man_df, df_2011, df_2016],
         plot_min=80, plot_max=820, TOP=True))
 
@@ -1825,11 +1419,11 @@ for i, site in enumerate(site_list):
     # Generate panel figures for current site and add 
     # to figure list
     if i==(len(site_list)-1):
-        figs_supp2.append(panels_121(
+        figs_supp2.append(viz.panels_121(
             datum=data_i,  plot_min=80, 
             plot_max=820, BOTTOM=True))
     else:
-        figs_supp2.append(panels_121(
+        figs_supp2.append(viz.panels_121(
             datum=data_i, plot_min=80, plot_max=820))
 
 # Combine individual site panels to final Supplementary figure
@@ -1909,7 +1503,7 @@ tmp = gpd.GeoDataFrame(
 tmp.to_crs(epsg=3031, inplace=True)
 echo2011['distance'] = (
     ('time'), 
-    np.flip(path_dist(
+    np.flip(so.path_dist(
         np.array([tmp.geometry.x, tmp.geometry.y]).T)))
 
 # Set new coordinates
@@ -1964,7 +1558,7 @@ tmp = gpd.GeoDataFrame(
 tmp.to_crs(epsg=3031, inplace=True)
 echo2016['distance'] = (
     ('time'), 
-    np.flip(path_dist(
+    np.flip(so.path_dist(
         np.array([tmp.geometry.x, tmp.geometry.y]).T)))
 
 # Set new coordinates
@@ -2019,18 +1613,18 @@ hv.save(echo2016_plt, ROOT_DIR.joinpath(
 
 # Import current 20111109 results
 dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
-data_raw = import_PAIPR(dir_)
+data_raw = paipr.import_PAIPR(dir_)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-smb_2011 = format_PAIPR(
+smb_2011 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1).set_index(['collect_time', 'Year'])
 
 # Import 20111109 depth results
 dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/depth/')
-depth_2011 = import_PAIPR(dir_).rename(
+depth_2011 = paipr.import_PAIPR(dir_).rename(
     columns={"IHR_year":"Year"}).set_index(
         ['collect_time', 'Year'])
 
@@ -2052,18 +1646,18 @@ gdf_depth2011.to_crs(epsg=3031, inplace=True)
 
 # Import current 20161109 results
 dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/smb/')
-data_raw = import_PAIPR(dir_)
+data_raw = paipr.import_PAIPR(dir_)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-smb_2016 = format_PAIPR(
+smb_2016 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1).set_index(['collect_time', 'Year'])
 
 # Import 20161109 depth results
 dir_ = ROOT_DIR.joinpath('data/PAIPR-repeat/20161109/depth/')
-depth_2016 = import_PAIPR(dir_).rename(
+depth_2016 = paipr.import_PAIPR(dir_).rename(
     columns={"IHR_year":"Year"}).set_index(
         ['collect_time', 'Year'])
 
@@ -2084,7 +1678,7 @@ gdf_depth2016.to_crs(epsg=3031, inplace=True)
 
 # Find nearest neighbors between 2011 and 2016 
 # (within 500 m)
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_depth2011, gdf_depth2016, return_dist=True)
 idx_paipr = df_dist['distance'] <= 250
 dist_overlap = df_dist[idx_paipr]
@@ -2136,12 +1730,12 @@ hv.Distribution(df_depths, kdims=['depth_res'], vdims=['Year']).groupby('Year')
 
 # Import old 20111109 results
 dir_old = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109')
-data_old = import_PAIPR(dir_old)
+data_old = paipr.import_PAIPR(dir_old)
 data_old.query('QC_flag != 2', inplace=True)
 smb_old = data_old.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-data_test = format_PAIPR(
+data_test = paipr.format_PAIPR(
     smb_old, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 aTest_ALL = data_test.pivot(
@@ -2151,12 +1745,12 @@ stdTest_ALL = data_test.pivot(
 
 # Import current 20111109 results
 dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20111109/smb/')
-data_raw = import_PAIPR(dir1)
+data_raw = paipr.import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
     'Year > QC_yr').sort_values(
     ['collect_time', 'Year']).reset_index(drop=True)
-data_2011 = format_PAIPR(
+data_2011 = paipr.format_PAIPR(
     data_0, start_yr=1990, end_yr=2010).drop(
     'elev', axis=1)
 a2011_ALL = data_2011.pivot(
@@ -2166,12 +1760,12 @@ std2011_ALL = data_2011.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_TestData = long2gdf(data_test)
+gdf_TestData = paipr.long2gdf(data_test)
 gdf_TestData.to_crs(epsg=3031, inplace=True)
-gdf_2011 = long2gdf(data_2011)
+gdf_2011 = paipr.long2gdf(data_2011)
 gdf_2011.to_crs(epsg=3031, inplace=True)
 
-df_dist = nearest_neighbor(
+df_dist = so.nearest_neighbor(
     gdf_2011, gdf_TestData, return_dist=True)
 idx_paipr = df_dist['distance'] <= 100
 dist_overlap = df_dist[idx_paipr]

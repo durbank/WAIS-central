@@ -13,10 +13,10 @@ import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
 from cartopy import feature as cf
-from bokeh.io import output_notebook
-output_notebook()
-hv.extension('bokeh')
-gv.extension('bokeh')
+# from bokeh.io import output_notebook
+# output_notebook()
+# hv.extension('bokeh')
+# gv.extension('bokeh')
 from shapely.geometry import Polygon, Point
 import xarray as xr
 from xrspatial import hillshade
@@ -33,7 +33,8 @@ DATA_DIR = ROOT_DIR.joinpath('data/PAIPR-outputs')
 import sys
 SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
-from my_functions import *
+from my_mods import paipr, stats
+import my_mods.spat_ops as so
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(
@@ -55,7 +56,7 @@ Ant = Ant.to_crs(epsg=3031)
 data_list = [folder for folder in DATA_DIR.glob('*')]
 data_raw = pd.DataFrame()
 for folder in data_list:
-    data = import_PAIPR(folder)
+    data = paipr.import_PAIPR(folder)
     data_raw = data_raw.append(data)
 
 # Remove results for below QC data reliability
@@ -65,7 +66,7 @@ data_0 = data_raw.query(
     ['collect_time', 'Year']).reset_index(drop=True)
 
 # Format and sort results for further processing
-data_form = format_PAIPR(data_0)
+data_form = paipr.format_PAIPR(data_0)
 
 # Create time series arrays for annual accumulation 
 # and error
@@ -76,7 +77,7 @@ std_ALL = data_form.pivot(
 
 # Create gdf of mean results for each trace and 
 # transform to Antarctic Polar Stereographic
-gdf_traces = long2gdf(data_form)
+gdf_traces = paipr.long2gdf(data_form)
 gdf_traces.to_crs(epsg=3031, inplace=True)
 
 
@@ -84,7 +85,7 @@ gdf_traces.to_crs(epsg=3031, inplace=True)
 
 # xr_vice = xr.open_dataset(ROOT_DIR.joinpath(
 #     'data/ice-velocities/antarctica_ice_velocity_450m_v2.nc'))
-# xr_pts = extract_at_pts(xr_vice, gdf_traces, return_dist=True)
+# xr_pts = so.extract_at_pts(xr_vice, gdf_traces, return_dist=True)
 
 # %% Import and format SAMBA cores
 
@@ -229,9 +230,9 @@ hill_plt = hv.Image(
 
 # Combine trace time series based on grid cells
 grid_res = 2500
-tmp_grids = pts2grid(gdf_traces, resolution=grid_res)
+tmp_grids = so.pts2grid(gdf_traces, resolution=grid_res)
 (gdf_grid_ALL, accum_grid_ALL, 
-    MoE_grid_ALL, yr_count_ALL) = trace_combine(
+    MoE_grid_ALL, yr_count_ALL) = so.trace_combine(
     tmp_grids, accum_ALL, std_ALL)
 
 # Limit time series to those within the bounds
@@ -270,7 +271,7 @@ gdf_core1979['accum'] = accum_core.mean()
 # %% Calculate linear trends
 
 # Calculate trends in radar
-trends, _, lb, ub = trend_bs(
+trends, _, lb, ub = stats.trend_bs(
     accum_grid, 1000, df_err=MoE_grid)
 gdf_grid['trend'] = trends
 gdf_grid['t_lb'] = lb
@@ -278,7 +279,7 @@ gdf_grid['t_ub'] = ub
 gdf_grid['t_perc'] = 100 * trends / gdf_grid['accum']
 
 # Calculate trends in cores
-trends, _, lb, ub = trend_bs(accum_core, 1000)
+trends, _, lb, ub = stats.trend_bs(accum_core, 1000)
 gdf_core1979['trend'] = trends
 gdf_core1979['t_lb'] = lb
 gdf_core1979['t_ub'] = ub
@@ -298,7 +299,7 @@ tmp = np.exp((tmp-tmp.min())/tmp.max())
 gdf_long['size'] = 13*tmp
 
 # Calculate trends in cores
-trends, _, lb, ub = trend_bs(cores_long, 1000)
+trends, _, lb, ub = stats.trend_bs(cores_long, 1000)
 gdf_long['trend'] = trends
 gdf_long['t_lb'] = lb
 gdf_long['t_ub'] = ub
@@ -314,7 +315,7 @@ gdf_long['trend_plt'] = gdf_long['trend']
 
 # %% Calculate trends for full duration
 
-# trends, _, lb, ub = trend_bs(
+# trends, _, lb, ub = stats.trend_bs(
 #     accum_grid_ALL, 1000, df_err=std_grid_ALL)
 # gdf_grid_ALL['trend'] = trends
 # gdf_grid_ALL['t_lb'] = lb
@@ -717,9 +718,9 @@ tmp = np.exp((tmp-tmp.min())/tmp.max())
 gdf_cores['size'] = 13*tmp
 
 # Combine trace time series based on grid cells
-tmp_grid_big = pts2grid(gdf_traces, resolution=100000)
+tmp_grid_big = so.pts2grid(gdf_traces, resolution=100000)
 (gdf_BIG, accum_BIG, 
-    MoE_BIG, yr_count_BIG) = trace_combine(
+    MoE_BIG, yr_count_BIG) = so.trace_combine(
     tmp_grid_big, accum_ALL, std_ALL)
 
 # Add the total duration of the time series for each grid
@@ -741,7 +742,7 @@ MoE_BIG = MoE_BIG[gdf_BIG.index]
 yr_count_BIG = yr_count_BIG[gdf_BIG.index]
 
 # Calculate trends for large grid cells
-trends, _, lb, ub = trend_bs(
+trends, _, lb, ub = stats.trend_bs(
     accum_BIG, 1000, df_err=MoE_BIG)
 gdf_BIG['trend'] = trends
 gdf_BIG['t_lb'] = lb
@@ -1082,22 +1083,3 @@ if grid_res > 1000:
         'docs/Figures/trendPERC_maps.png'))    
     BigTS_fig.savefig(fname=ROOT_DIR.joinpath(
         'docs/Figures/BigTS_fig.svg'))
-
-# %% Only save plots if grid resolution is larger version
-
-# trend_panel = hv.Layout(
-#     trend_plt.opts(
-#         height=1000, width=1000, fontscale=2)
-#     + tMOE_plt.opts(
-#         height=1000, width=1000, fontscale=2)
-#     + trend_sig_plt.opts(
-#         height=1000, width=1000, fontscale=2)).cols(
-#     2).redim.range(trend=(-8,8))
-
-# trendPERC_panel = hv.Layout(
-#     trendPERC_plt.opts(
-#         height=1000, width=1000, fontscale=2)
-#     + coreALL_plt.opts(
-#         width=1000, height=1000, 
-#         fontscale=2)).redim.range(
-#     t_perc=(-3,3))
