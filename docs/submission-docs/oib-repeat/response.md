@@ -14,10 +14,10 @@ The edits incorporated into the manuscript also necessitated the moving of the d
 We do not, however, feel these changes materially impact the readability of the manuscript or cause undue jumps in logic when trying to follow the methods, results, and implications of the research.
 We have made edits throughout the manuscript to ensure no loss in continuity due to these adjustments.
 
-We include two copies of the manuscript in this submission.
-The first is a direct update from the initial submission in the.
-The second highlights the specific changes we have made since the original submission with additions in blue and deletions in red.
-Line numbers in the following comments reference the location of edits in the second, color-highlighted document.
+We include two copies of the manuscript (and two corresponding copies of the supplement) in this submission.
+The first copy (main-revised.pdf and supplement-revised.pdf) is a direct update from the initial submission.
+The second copy (main-revised_diff.pdf and supp-revised_diff.pdf) highlights the specific changes we have made since the original submission with additions in blue and deletions in red.
+Line numbers in the following comments reference the location of edits in the second, color-highlighted documents.
 
 ## Responses to Reviewer 1
 
