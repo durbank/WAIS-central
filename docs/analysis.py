@@ -329,6 +329,7 @@ import statsmodels.api as sm
 rlm_param = []
 rlm_Tlb = []
 rlm_Tub = []
+pvals = []
 
 for name, series in accum_grid.items():
     X = sm.add_constant(series.index.values)
@@ -340,10 +341,22 @@ for name, series in accum_grid.items():
     # wls_r2.append(mod.rsquared)
     rlm_Tlb.append(mod.conf_int()[1,0])
     rlm_Tub.append(mod.conf_int()[1,1])
+    pvals.append(mod.pvalues[1])
 
 gdf_grid['rlm_T'] = rlm_param
 gdf_grid['rlm_lb'] = rlm_Tlb
 gdf_grid['rlm_ub'] = rlm_Tub
+gdf_grid['rlm_p'] = pvals
+
+# %% Walker field significance tests
+
+a_global = 0.05
+K = gdf_grid.shape[0]
+p_walker = 1 - (1-a_global)**(1/K)
+
+print(f"Walker field significance test (alpha={a_global}) indicates that min p-value must be lower than {p_walker:.2E}")
+print(f"Min p-value in data: {gdf_grid['rlm_p'].min():.2E}")
+print(f"A total of {100*(gdf_grid['rlm_p'] <= p_walker).sum()/ gdf_grid['rlm_p'].count():.0f}% of results meet the Walker criteria")
 
 # %% Data location map
 
