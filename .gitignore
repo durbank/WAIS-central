@@ -188,3 +188,15 @@ data/*
 
 # Ignore tmp Python and Jupyter notebooks
 *.ipynb
+
+# Ignore the docs/Figures/ directory contents
+docs/Figures/*
+
+# # Ignore figures in the docs folder
+# **/docs/*.jpg
+# **/docs/*.png
+# **/docs/*.svg
+# **/docs/*.pdf
+
+# Other misc. file formats to ignore
+*.zip
