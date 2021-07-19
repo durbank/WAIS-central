@@ -7,8 +7,11 @@ import numpy as np
 from scipy import signal
 import statsmodels.tsa.stattools as tsa
 from scipy.spatial.distance import pdist
+from scipy.stats import gaussian_kde as kde
 
-def trend_bs(df, nsim, df_err=pd.DataFrame(), pval=False):
+def trend_bs(
+    df, nsim, df_err=pd.DataFrame(), 
+    pval=False, n_samples=None):
     """
     Dpc string goes here.
     """
@@ -74,7 +77,7 @@ def trend_bs(df, nsim, df_err=pd.DataFrame(), pval=False):
 
         # Generate null data
         df_null = pd.DataFrame(
-            np.nan_to_num(signal.detrend(df, axis=0)), 
+            signal.detrend(df.fillna(df.mean()), axis=0), 
             index=df.index)
         
         null_trends = pd.DataFrame(columns=df_null.columns)
@@ -91,16 +94,25 @@ def trend_bs(df, nsim, df_err=pd.DataFrame(), pval=False):
                 index=df_null.columns), 
                 ignore_index=True)
         
+        
+        if n_samples is None:
+            n_samples = nsim
+
         # Estimate p-values based on comparison to null models
         pvals = np.zeros(len(trend_mu))
         for i, mu in enumerate(trend_mu):
 
             null_vals = null_trends.iloc[:,i]
-            pvals[i] = (abs(null_vals) >= abs(mu)).sum() \
-                / len(null_vals)
+
+            # Approximate continuous distribution using kde
+            null_dist = kde(null_vals)
+            null_samples = null_dist.resample(n_samples).squeeze()
+
+            pvals[i] = (abs(null_samples) >= abs(mu)).sum() \
+                / len(null_samples)
 
         toc = time.perf_counter()
-        print(f"Execution time of null modeling: {toc-tic} s")
+        print(f"Execution time for p-values: {toc-tic} s")
 
         return trend_mu, intercept_mu, trendCI_lb, trendCI_ub, pvals
 

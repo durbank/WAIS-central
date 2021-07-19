@@ -15,8 +15,8 @@ from cartopy import crs as ccrs
 from cartopy import feature as cf
 # from bokeh.io import output_notebook
 # output_notebook()
-# hv.extension('bokeh')
-# gv.extension('bokeh')
+hv.extension('bokeh')
+gv.extension('bokeh')
 from shapely.geometry import Polygon, Point
 import xarray as xr
 from xrspatial import hillshade
@@ -268,24 +268,38 @@ accum_core = core_ACCUM.loc[yr_start:yr_end,keep_idx]
 gdf_core1979 = gdf_cores.copy().loc[keep_idx,:]
 gdf_core1979['accum'] = accum_core.mean()
 
-# %% Calculate linear trends
+# %% Calculate linear trends in radar
+
+# Critical p-value for walker field significance
+a_global = 0.05
+K = gdf_grid.shape[0]
+p_walker = 1 - (1-a_global)**(1/K)
+
+# Min power of 10 necessary to ensure sufficient significant digits
+n_sigfig = int(10**(np.ceil(np.log10(1/p_walker))))
 
 # Calculate trends in radar
-trends, _, lb, ub = stats.trend_bs(
-    accum_grid, 1000, df_err=MoE_grid)
+trends, _, lb, ub, pvals = stats.trend_bs(
+    accum_grid, 1000, df_err=MoE_grid, 
+    pval=True, n_samples=n_sigfig)
 gdf_grid['trend'] = trends
 gdf_grid['t_lb'] = lb
 gdf_grid['t_ub'] = ub
+gdf_grid['pval'] = pvals
 gdf_grid['t_perc'] = 100 * trends / gdf_grid['accum']
 
+# %% Calculate trends for cores (both full series and partial coverage)
+
 # Calculate trends in cores
-trends, _, lb, ub = stats.trend_bs(accum_core, 1000)
+p_walker_core = 1 - (1-a_global)**(1/accum_core.shape[1])
+n_sigfig = int(10**(np.ceil(np.log10(1/p_walker_core))))
+trends, _, lb, ub, pvals = stats.trend_bs(
+    accum_core, 1000, pval=True, n_samples=n_sigfig)
 gdf_core1979['trend'] = trends
 gdf_core1979['t_lb'] = lb
 gdf_core1979['t_ub'] = ub
+gdf_core1979['pval'] = pvals
 gdf_core1979['t_perc'] = 100 * trends/gdf_core1979['accum']
-
-# %% Calculate trends for partial-coverage cores
 
 # Keep all core data from start of selected radar data to present
 cores_long = core_ACCUM.loc[yr_start:]
@@ -299,10 +313,14 @@ tmp = np.exp((tmp-tmp.min())/tmp.max())
 gdf_long['size'] = 13*tmp
 
 # Calculate trends in cores
-trends, _, lb, ub = stats.trend_bs(cores_long, 1000)
+p_core_long = 1 - (1-a_global)**(1/cores_long.shape[1])
+n_sigfig = int(10**(np.ceil(np.log10(1/p_core_long))))
+trends, _, lb, ub, pvals = stats.trend_bs(
+    cores_long, 1000, pval=True, n_samples=n_sigfig)
 gdf_long['trend'] = trends
 gdf_long['t_lb'] = lb
 gdf_long['t_ub'] = ub
+gdf_long['pval'] = pvals
 gdf_long['t_perc'] = 100 * trends / gdf_long['accum']
 
 # Determine trend significance for cores
@@ -313,50 +331,43 @@ gdf_long['sig'] = np.invert(np.array(
 # Add additional trend column (for when I want to scale plot separately)
 gdf_long['trend_plt'] = gdf_long['trend']
 
-# %% Calculate trends for full duration
+# %%
 
-# trends, _, lb, ub = stats.trend_bs(
-#     accum_grid_ALL, 1000, df_err=std_grid_ALL)
-# gdf_grid_ALL['trend'] = trends
-# gdf_grid_ALL['t_lb'] = lb
-# gdf_grid_ALL['t_ub'] = ub
-# gdf_grid_ALL['t_perc'] = 100*trends / gdf_grid_ALL['accum']
+print(f"Walker field significance test (alpha={a_global}) indicates that min p-value must be lower than {p_walker:.2E}")
+# print(f"Min p-value in data: {gdf_grid['pval'].min():.2E}")
+print(f"A total of {(gdf_grid['pval'] <= p_walker).sum():.0f} samples ({100*(gdf_grid['pval'] <= p_walker).sum()/ gdf_grid['pval'].count():.0f}%) meet the Walker criteria")
+
+print(f"Walker field significance test (alpha={a_global}) indicates that min p-value for cores must be lower than {p_walker_core:.2E}")
+print(f"A total of {(gdf_core1979['pval'] <= p_walker_core).sum():.0f} samples ({100*(gdf_core1979['pval'] <= p_walker_core).sum()/ gdf_core1979['pval'].count():.0f}%) meet the Walker criteria")
+
+print(f"Walker field significance test (alpha={a_global}) indicates that min p-val for long cores must be lower than {p_core_long:.2E}")
+print(f"A total of {(gdf_long['pval'] <= p_core_long).sum():.0f} samples ({100*(gdf_long['pval'] <= p_core_long).sum()/ gdf_long['pval'].count():.0f}%) meet the Walker criteria")
 
 # %% Calculate trends using non-Bootstrapping
 
-import statsmodels.api as sm
+# import statsmodels.api as sm
 
-rlm_param = []
-rlm_Tlb = []
-rlm_Tub = []
-pvals = []
+# rlm_param = []
+# rlm_Tlb = []
+# rlm_Tub = []
+# pvals = []
 
-for name, series in accum_grid.items():
-    X = sm.add_constant(series.index.values)
-    y = series.values
-    # W = 1/(std_grid.loc[:,name].values**2)
-    # mod = sm.WLS(y,X, weights=W).fit()
-    mod = sm.RLM(y,X).fit()
-    rlm_param.append(mod.params[1])
-    # wls_r2.append(mod.rsquared)
-    rlm_Tlb.append(mod.conf_int()[1,0])
-    rlm_Tub.append(mod.conf_int()[1,1])
-    pvals.append(mod.pvalues[1])
+# for name, series in accum_grid.items():
+#     X = sm.add_constant(series.index.values)
+#     y = series.values
+#     # W = 1/(std_grid.loc[:,name].values**2)
+#     # mod = sm.WLS(y,X, weights=W).fit()
+#     mod = sm.RLM(y,X).fit()
+#     rlm_param.append(mod.params[1])
+#     # wls_r2.append(mod.rsquared)
+#     rlm_Tlb.append(mod.conf_int()[1,0])
+#     rlm_Tub.append(mod.conf_int()[1,1])
+#     pvals.append(mod.pvalues[1])
 
-gdf_grid['rlm_T'] = rlm_param
-gdf_grid['rlm_lb'] = rlm_Tlb
-gdf_grid['rlm_ub'] = rlm_Tub
-gdf_grid['rlm_p'] = pvals
-
-# %% Walker field significance tests
-
-a_global = 0.05
-K = gdf_grid.shape[0]
-p_walker = 1 - (1-a_global)**(1/K)
-
-print(f"Walker field significance test (alpha={a_global}) indicates that min p-value must be lower than {p_walker:.2E}")
-print(f"Min p-value in data: {gdf_grid['rlm_p'].min():.2E}")
-print(f"A total of {100*(gdf_grid['rlm_p'] <= p_walker).sum()/ gdf_grid['rlm_p'].count():.0f}% of results meet the Walker criteria")
+# gdf_grid['rlm_T'] = rlm_param
+# gdf_grid['rlm_lb'] = rlm_Tlb
+# gdf_grid['rlm_ub'] = rlm_Tub
+# gdf_grid['rlm_p'] = pvals
 
 # %% Data location map
 
@@ -755,12 +766,19 @@ MoE_BIG = MoE_BIG[gdf_BIG.index]
 yr_count_BIG = yr_count_BIG[gdf_BIG.index]
 
 # Calculate trends for large grid cells
-trends, _, lb, ub = stats.trend_bs(
-    accum_BIG, 1000, df_err=MoE_BIG)
+p_walker_BIG = 1 - (1-a_global)**(1/accum_BIG.shape[1])
+n_sigfig = int(10**(np.ceil(np.log10(1/p_walker_BIG))))
+trends, _, lb, ub, pvals = stats.trend_bs(
+    accum_BIG, 1000, df_err=MoE_BIG, 
+    pval=True, n_samples=n_sigfig)
 gdf_BIG['trend'] = trends
 gdf_BIG['t_lb'] = lb
 gdf_BIG['t_ub'] = ub
+gdf_BIG['pval'] = pvals
 gdf_BIG['t_perc'] = 100*trends / gdf_BIG['accum']
+
+print(f"Walker field significance test (alpha={a_global}) indicates that min p-value must be lower than {p_walker_BIG:.2E}")
+print(f"A total of {(gdf_BIG['pval'] <= p_walker).sum():.0f} samples ({100*(gdf_BIG['pval'] <= p_walker_BIG).sum()/ gdf_BIG['pval'].count():.0f}%) meet the Walker criteria")
 
 # %%
 
