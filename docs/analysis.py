@@ -268,6 +268,14 @@ accum_core = core_ACCUM.loc[yr_start:yr_end,keep_idx]
 gdf_core1979 = gdf_cores.copy().loc[keep_idx,:]
 gdf_core1979['accum'] = accum_core.mean()
 
+# %% Investigate temporal autocorrelation in data
+
+auto_corr = stats.acf(accum_grid)
+auto_corr.mean(axis=1).plot()
+
+# Define moving blocks bootstrap block size
+blck_sz = 3
+
 # %% Calculate linear trends in radar
 
 # Critical p-value for walker field significance
@@ -280,8 +288,8 @@ n_sigfig = int(10**(np.ceil(np.log10(1/p_walker))))
 
 # Calculate trends in radar
 trends, _, lb, ub, pvals = stats.trend_bs(
-    accum_grid, 1000, df_err=MoE_grid, 
-    pval=True, n_samples=n_sigfig)
+    accum_grid, 1000, df_err=MoE_grid, blck_sz=3, 
+    pvals=True, n_pvals=n_sigfig)
 gdf_grid['trend'] = trends
 gdf_grid['t_lb'] = lb
 gdf_grid['t_ub'] = ub
@@ -294,7 +302,7 @@ gdf_grid['t_perc'] = 100 * trends / gdf_grid['accum']
 p_walker_core = 1 - (1-a_global)**(1/accum_core.shape[1])
 n_sigfig = int(10**(np.ceil(np.log10(1/p_walker_core))))
 trends, _, lb, ub, pvals = stats.trend_bs(
-    accum_core, 1000, pval=True, n_samples=n_sigfig)
+    accum_core, 1000, blck_sz=3, pvals=True, n_pvals=n_sigfig)
 gdf_core1979['trend'] = trends
 gdf_core1979['t_lb'] = lb
 gdf_core1979['t_ub'] = ub
@@ -316,7 +324,7 @@ gdf_long['size'] = 13*tmp
 p_core_long = 1 - (1-a_global)**(1/cores_long.shape[1])
 n_sigfig = int(10**(np.ceil(np.log10(1/p_core_long))))
 trends, _, lb, ub, pvals = stats.trend_bs(
-    cores_long, 1000, pval=True, n_samples=n_sigfig)
+    cores_long, 1000, blck_sz=3, pvals=True, n_pvals=n_sigfig)
 gdf_long['trend'] = trends
 gdf_long['t_lb'] = lb
 gdf_long['t_ub'] = ub

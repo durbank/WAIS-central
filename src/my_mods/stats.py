@@ -9,9 +9,22 @@ import statsmodels.tsa.stattools as tsa
 from scipy.spatial.distance import pdist
 from scipy.stats import gaussian_kde as kde
 
+def blck_resample(df, blck_sz):
+
+    k = df.shape[0] // blck_sz
+    start_idx = np.random.randint(0,df.shape[0]-blck_sz, k)
+    idx = []
+    for num in start_idx:
+        for el in range(blck_sz):
+            idx.append(num + el)
+    
+    df_sample = df.iloc[idx,:].sort_index()
+
+    return df_sample
+
 def trend_bs(
-    df, nsim, df_err=pd.DataFrame(), 
-    pval=False, n_samples=None):
+    df, nsim, df_err=pd.DataFrame(), blck_sz=1,
+    pvals=False, n_pvals=None):
     """
     Dpc string goes here.
     """
@@ -30,8 +43,9 @@ def trend_bs(
     # Peform bootstrapping
     for _ in range(nsim):
         # Randomly resample data
-        data_bs = df.sample(
-            len(df), replace=True).sort_index()
+        # data_bs = df.sample(
+        #     len(df), replace=True).sort_index()
+        data_bs = blck_resample(df, blck_sz=blck_sz)
         
         # Generate mean weights
         weights_bs = (
@@ -71,7 +85,7 @@ def trend_bs(
     trendCI_lb = np.nanpercentile(trends_bs, 2.5, axis=0)
     trendCI_ub = np.nanpercentile(trends_bs, 97.5, axis=0)
 
-    if pval:
+    if pvals:
 
         tic = time.perf_counter()
 
@@ -95,8 +109,8 @@ def trend_bs(
                 ignore_index=True)
         
         
-        if n_samples is None:
-            n_samples = nsim
+        if n_pvals is None:
+            n_pvals = nsim
 
         # Estimate p-values based on comparison to null models
         pvals = np.zeros(len(trend_mu))
@@ -106,7 +120,7 @@ def trend_bs(
 
             # Approximate continuous distribution using kde
             null_dist = kde(null_vals)
-            null_samples = null_dist.resample(n_samples).squeeze()
+            null_samples = null_dist.resample(n_pvals).squeeze()
 
             pvals[i] = (abs(null_samples) >= abs(mu)).sum() \
                 / len(null_samples)
