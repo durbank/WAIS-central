@@ -268,6 +268,23 @@ accum_core = core_ACCUM.loc[yr_start:yr_end,keep_idx]
 gdf_core1979 = gdf_cores.copy().loc[keep_idx,:]
 gdf_core1979['accum'] = accum_core.mean()
 
+# %% Exporting long format for R mixed effects modeling
+
+# r_accum = pd.melt(
+#     accum_grid.reset_index(), 
+#     id_vars='Year', var_name='ID', value_name='accum')
+
+# loc_df = pd.DataFrame(
+#     {'Easting': gdf_grid.geometry.centroid.x, 
+#     'Northing': gdf_grid.geometry.centroid.y}, 
+#     index=gdf_grid.index)
+
+# r_df = pd.merge(
+#     left=r_accum, right=loc_df, how='left', 
+#     left_on='ID', right_index=True)
+
+# r_df.to_csv(ROOT_DIR.joinpath('data/exports/accum_export.csv'))
+
 # %% Investigate temporal autocorrelation in data
 
 auto_corr = stats.acf(accum_grid)
