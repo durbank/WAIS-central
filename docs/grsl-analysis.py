@@ -1725,6 +1725,144 @@ df_depths['depth_res'] = (
 
 hv.Distribution(df_depths, kdims=['depth_res'], vdims=['Year']).groupby('Year')
 
+#%%[markdown]
+
+# ## Investigations from the Ronne Ice Shelf region
+# 
+# %% Import PAIPR-generated data
+
+# Import 20121018 results
+dir1 = ROOT_DIR.joinpath('data/PAIPR-repeat/20121018/smb/')
+data_raw = paipr.import_PAIPR(dir1)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+data_2012 = paipr.format_PAIPR(
+    data_0, start_yr=2004, end_yr=2011, rm_deep=False).drop(
+    'elev', axis=1)
+a2012_ALL = data_2012.pivot(
+    index='Year', columns='trace_ID', values='accum')
+std2012_ALL = data_2012.pivot(
+    index='Year', columns='trace_ID', values='std')
+
+# Import 20161024 results
+dir2 = ROOT_DIR.joinpath('data/PAIPR-repeat/20161024/smb/')
+data_raw = paipr.import_PAIPR(dir2)
+data_raw.query('QC_flag != 2', inplace=True)
+data_0 = data_raw.query(
+    'Year > QC_yr').sort_values(
+    ['collect_time', 'Year']).reset_index(drop=True)
+data_2016 = paipr.format_PAIPR(
+    data_0, start_yr=2004, end_yr=2011, rm_deep=False).drop(
+    'elev', axis=1)
+a2016r_ALL = data_2016.pivot(
+    index='Year', columns='trace_ID', values='accum')
+std2016r_ALL = data_2016.pivot(
+    index='Year', columns='trace_ID', values='std')
+
+# Create gdf of mean results for each trace and 
+# transform to Antarctic Polar Stereographic
+gdf_2012 = paipr.long2gdf(data_2012)
+gdf_2012.to_crs(epsg=3031, inplace=True)
+gdf_2016r = paipr.long2gdf(data_2016)
+gdf_2016r.to_crs(epsg=3031, inplace=True)
+
+# %% Determine overlap between datasets
+
+# Find nearest neighbors between 2011 and 2016 
+# (within 500 m)
+df_dist = so.nearest_neighbor(
+    gdf_2012, gdf_2016r, return_dist=True)
+idx_paipr = df_dist['distance'] <= 500
+dist_overlap = df_dist[idx_paipr]
+
+# Create numpy arrays for relevant results
+accum_2012 = a2012_ALL.iloc[
+    :,dist_overlap.index]
+std_2012 = std2012_ALL.iloc[
+    :,dist_overlap.index]
+accum_2016r = a2016r_ALL.iloc[
+    :,dist_overlap['trace_ID']]
+std_2016r = std2016r_ALL.iloc[
+    :,dist_overlap['trace_ID']]
+
+# Create new gdf of subsetted results
+gdf_ronne = gpd.GeoDataFrame(
+    {'ID_2012': dist_overlap.index.values, 
+    'ID_2016': dist_overlap['trace_ID'].values, 
+    'trace_dist': dist_overlap['distance'].values,
+    'QC_2012': gdf_2012.loc[dist_overlap.index,'QC_med'].values,
+    'QC_2016': dist_overlap['QC_med'].values, 
+    'accum_2012': 
+        accum_2012.mean(axis=0).values, 
+    'accum_2016': 
+        accum_2016r.mean(axis=0).values},
+    geometry=dist_overlap.geometry.values)
+
+# Calculate bulk accum mean and accum residual
+gdf_ronne['accum_mu'] = gdf_ronne[
+    ['accum_2012', 'accum_2016']].mean(axis=1)
+gdf_ronne['accum_res'] = (
+    (gdf_ronne.accum_2016 - gdf_ronne.accum_2012) 
+    / gdf_ronne.accum_mu)
+
+# %%
+
+# Create dataframes for scatter plots
+ronne_df = pd.DataFrame(
+    {'tmp_ID': np.tile(
+        np.arange(0,accum_2012.shape[1]), 
+        accum_2012.shape[0]), 
+    'Year': np.reshape(
+        np.repeat(accum_2012.index, accum_2012.shape[1]), 
+        accum_2012.size), 
+    'accum_2012': 
+        np.reshape(
+            accum_2012.values, accum_2012.size), 
+    'std_2012': np.reshape(
+        std_2012.values, std_2012.size), 
+    'accum_2016': np.reshape(
+        accum_2016r.values, accum_2016r.size), 
+    'std_2016': np.reshape(
+        std_2016r.values, std_2016r.size)})
+
+# Add residuals to dataframe
+ronne_df['res_accum'] = ronne_df['accum_2016']-ronne_df['accum_2012']
+ronne_df['res_perc'] = (
+    100*(ronne_df['res_accum'])
+    /(ronne_df[['accum_2016','accum_2012']]).mean(axis=1))
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+
+scatt_yr = hv.Points(
+    data=ronne_df, 
+    kdims=['accum_2012', 'accum_2016'], 
+    vdims=['Year'])
+    
+ronne_1to1_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2012 PAIPR (mm/yr)', 
+    ylabel='2016 PAIPR (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600, fontscale=1.75)
+
+one_to_one = hv.Curve(
+    data=pd.DataFrame(
+        {'x':[100,750], 'y':[100,750]}))
+scatt_yr = hv.Points(
+    data=PAIPR_df, 
+    kdims=['accum_2012', 'accum_2016'], 
+    vdims=['Year', 'Site']).groupby('Site')
+site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
+    xlim=(100,750), ylim=(100,750), 
+    xlabel='2011 flight (mm/yr)', 
+    ylabel='2016 flight (mm/yr)', 
+    color='Year', cmap='plasma', colorbar=True, 
+    width=600, height=600, fontscale=1.75)
+
+paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
 
 # %% Compare PAIPR results from different random seeds
 

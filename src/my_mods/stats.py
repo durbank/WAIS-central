@@ -155,7 +155,7 @@ def acf(df):
 def vario(
     points_gdf, lag_size, 
     d_metric='euclidean', vars='all', 
-    stationarize=False, scale=True):
+    standardize=False, scale=True):
     """A function to calculate the experimental variogram for values associated with a geoDataFrame of points.
 
     Args:
@@ -169,10 +169,22 @@ def vario(
         pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
     """
 
+    # Make copy to preserve original input df
+    points_gdf = points_gdf.copy()
+
     # Get column names if 'all' is selected for "vars"
     if vars == "all":
         vars = points_gdf.drop(
             columns='geometry').columns
+
+    if standardize:
+        for var in vars:
+            points_gdf[var] = (
+                (points_gdf[var] - points_gdf[var].mean()) / points_gdf[var].std() )
+
+    # Check if supplied gpd is Points or not
+    if (~points_gdf.geom_type.isin(['Point'])).sum():
+        points_gdf['geometry'] = points_gdf.centroid
 
     # Extact trace coordinates and calculate pairwise distance
     locs_arr = np.array(
@@ -189,9 +201,6 @@ def vario(
                 i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
                 j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
 
-
-    if stationarize:
-        pass
     
     # Create dfs for paired-point values
     i_vals = points_gdf[vars].iloc[i_idx].reset_index(
