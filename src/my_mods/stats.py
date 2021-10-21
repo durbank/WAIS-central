@@ -7,8 +7,24 @@ import numpy as np
 from scipy import signal
 import statsmodels.tsa.stattools as tsa
 from scipy.spatial.distance import pdist
+from scipy.stats import gaussian_kde as kde
 
-def trend_bs(df, nsim, df_err=pd.DataFrame()):
+def blck_resample(df, blck_sz):
+
+    k = df.shape[0] // blck_sz
+    start_idx = np.random.randint(0,df.shape[0]-blck_sz, k)
+    idx = []
+    for num in start_idx:
+        for el in range(blck_sz):
+            idx.append(num + el)
+    
+    df_sample = df.iloc[idx,:].sort_index()
+
+    return df_sample
+
+def trend_bs(
+    df, nsim, df_err=pd.DataFrame(), blck_sz=1,
+    pvals=False, n_pvals=None):
     """
     Dpc string goes here.
     """
@@ -18,7 +34,8 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     trends_bs = pd.DataFrame(columns=df.columns)
     intercepts = pd.DataFrame(columns=df.columns)
 
-    # In no errors exist, create neutral weights
+    # If no errors exist, create neutral weights
+
     if df_err.empty:
         df_err = pd.DataFrame(
             np.ones(df.shape), index=df.index, 
@@ -27,8 +44,9 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     # Peform bootstrapping
     for _ in range(nsim):
         # Randomly resample data
-        data_bs = df.sample(
-            len(df), replace=True).sort_index()
+        # data_bs = df.sample(
+        #     len(df), replace=True).sort_index()
+        data_bs = blck_resample(df, blck_sz=blck_sz)
         
         # Generate mean weights
         weights_bs = (
@@ -68,7 +86,53 @@ def trend_bs(df, nsim, df_err=pd.DataFrame()):
     trendCI_lb = np.nanpercentile(trends_bs, 2.5, axis=0)
     trendCI_ub = np.nanpercentile(trends_bs, 97.5, axis=0)
 
-    return trend_mu, intercept_mu, trendCI_lb, trendCI_ub
+    if pvals:
+
+        tic = time.perf_counter()
+
+        # Generate null data
+        df_null = pd.DataFrame(
+            signal.detrend(df.fillna(df.mean()), axis=0), 
+            index=df.index)
+        
+        null_trends = pd.DataFrame(columns=df_null.columns)
+
+        # Generate null model estimates
+        for _ in range(nsim):
+
+            null_bs = df_null.sample(
+                len(df_null), replace=True).sort_index()
+            coeffs_null = np.polyfit(
+                null_bs.index, null_bs, 1)
+            null_trends = null_trends.append(
+                pd.Series(coeffs_null[0], 
+                index=df_null.columns), 
+                ignore_index=True)
+        
+        
+        if n_pvals is None:
+            n_pvals = nsim
+
+        # Estimate p-values based on comparison to null models
+        pvals = np.zeros(len(trend_mu))
+        for i, mu in enumerate(trend_mu):
+
+            null_vals = null_trends.iloc[:,i]
+
+            # Approximate continuous distribution using kde
+            null_dist = kde(null_vals)
+            null_samples = null_dist.resample(n_pvals).squeeze()
+
+            pvals[i] = (abs(null_samples) >= abs(mu)).sum() \
+                / len(null_samples)
+
+        toc = time.perf_counter()
+        print(f"Execution time for p-values: {toc-tic} s")
+
+        return trend_mu, intercept_mu, trendCI_lb, trendCI_ub, pvals
+
+    else:    
+        return trend_mu, intercept_mu, trendCI_lb, trendCI_ub
 
 # Function to perform autocorrelation
 def acf(df):
@@ -92,7 +156,7 @@ def acf(df):
 def vario(
     points_gdf, lag_size, 
     d_metric='euclidean', vars='all', 
-    stationarize=False, scale=True):
+    standardize=False, scale=True):
     """A function to calculate the experimental variogram for values associated with a geoDataFrame of points.
 
     Args:
@@ -106,10 +170,22 @@ def vario(
         pandas.core.frame.DataFrame: The calculated semivariance values for each chosen input. Also includes the lag interval (index), the average separation distance (dist), and the number of paired points within each interval (cnt). 
     """
 
+    # Make copy to preserve original input df
+    points_gdf = points_gdf.copy()
+
     # Get column names if 'all' is selected for "vars"
     if vars == "all":
         vars = points_gdf.drop(
             columns='geometry').columns
+
+    if standardize:
+        for var in vars:
+            points_gdf[var] = (
+                (points_gdf[var] - points_gdf[var].mean()) / points_gdf[var].std() )
+
+    # Check if supplied gpd is Points or not
+    if (~points_gdf.geom_type.isin(['Point'])).sum():
+        points_gdf['geometry'] = points_gdf.centroid
 
     # Extact trace coordinates and calculate pairwise distance
     locs_arr = np.array(
@@ -125,10 +201,6 @@ def vario(
             if i < j < m:
                 i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
                 j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
-
-
-    if stationarize:
-        pass
     
     # Create dfs for paired-point values
     i_vals = points_gdf[vars].iloc[i_idx].reset_index(

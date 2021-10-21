@@ -23,7 +23,9 @@ def import_PAIPR(input_dir):
         data['collect_time'])
     return data
 
-def format_PAIPR(data_df, start_yr=None, end_yr=None):
+def format_PAIPR(
+    data_df, start_yr=None, end_yr=None, 
+    yr_clip=True, rm_deep=True):
     """
 
     """
@@ -72,27 +74,21 @@ def format_PAIPR(data_df, start_yr=None, end_yr=None):
                 accum=data_df['accum_mu'], 
                 std=data_df['accum_std']).reset_index(drop=True))
 
-    # Additional subroutine to remove time series where the deepest 
-    # 3 years have overly large uncertainties (2*std > expected value)
-    # data_tmp = data_long[data_long['Year'] <= (start_yr+2)]
-    # data_log = pd.DataFrame(
-    #     {'trace_ID': data_tmp['trace_ID'], 
-    #     'ERR_log': 2*data_tmp['std'] > data_tmp['accum']})
-    # trace_tmp = data_log.groupby('trace_ID')
-    # IDs_keep = trace_tmp.filter(
-    #     lambda x: not all(x['ERR_log']))['trace_ID'].unique()
-    data_tmp = data_long.groupby(
-        'trace_ID').mean().query('2*std < accum').reset_index()
-    IDs_keep = data_tmp['trace_ID']
-    data_long = data_long[
-        data_long['trace_ID'].isin(IDs_keep)]
+    if rm_deep:
+        # Additional subroutine to remove time series where the deepest 3 years have overly large uncertainties (std > expected value)
+        data_tmp = data_long.groupby(
+            'trace_ID').mean().query('std < accum').reset_index()
+        IDs_keep = data_tmp['trace_ID']
+        data_long = data_long[
+            data_long['trace_ID'].isin(IDs_keep)]
 
-    # Remove time series with fewer than 5 years
-    data_tmp = data_long.join(
-        data_long.groupby('trace_ID')['Year'].count(), 
-        on='trace_ID', rsuffix='_count')
-    data_long = data_tmp.query('Year_count >= 5').drop(
-        'Year_count', axis=1)
+    if yr_clip:
+        # Remove time series with fewer than 5 years
+        data_tmp = data_long.join(
+            data_long.groupby('trace_ID')['Year'].count(), 
+            on='trace_ID', rsuffix='_count')
+        data_long = data_tmp.query('Year_count >= 5').drop(
+            'Year_count', axis=1)
 
     # Reset trace IDs to match total number of traces
     tmp_group = data_long.groupby('trace_ID')
