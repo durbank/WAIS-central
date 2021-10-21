@@ -307,6 +307,7 @@ n_sigfig = int(10**(np.ceil(np.log10(1/p_walker))))
 trends, _, lb, ub, pvals = stats.trend_bs(
     accum_grid, 1000, df_err=MoE_grid, blck_sz=3, 
     pvals=True, n_pvals=n_sigfig)
+
 gdf_grid['trend'] = trends
 gdf_grid['t_lb'] = lb
 gdf_grid['t_ub'] = ub
@@ -361,6 +362,12 @@ gdf_long['trend_plt'] = gdf_long['trend']
 print(f"Walker field significance test (alpha={a_global}) indicates that min p-value must be lower than {p_walker:.2E}")
 # print(f"Min p-value in data: {gdf_grid['pval'].min():.2E}")
 print(f"A total of {(gdf_grid['pval'] <= p_walker).sum():.0f} samples ({100*(gdf_grid['pval'] <= p_walker).sum()/ gdf_grid['pval'].count():.0f}%) meet the Walker criteria")
+# trends, _, lb, ub = stats.trend_bs(
+#     accum_grid_ALL, 1000, df_err=std_grid_ALL)
+# gdf_grid_ALL['trend'] = trends
+# gdf_grid_ALL['t_lb'] = lb
+# gdf_grid_ALL['t_ub'] = ub
+# gdf_grid_ALL['t_perc'] = 100*trends / gdf_grid_ALL['accum']
 
 print(f"Walker field significance test (alpha={a_global}) indicates that min p-value for cores must be lower than {p_walker_core:.2E}")
 print(f"A total of {(gdf_core1979['pval'] <= p_walker_core).sum():.0f} samples ({100*(gdf_core1979['pval'] <= p_walker_core).sum()/ gdf_core1979['pval'].count():.0f}%) meet the Walker criteria")
@@ -796,6 +803,7 @@ n_sigfig = int(10**(np.ceil(np.log10(1/p_walker_BIG))))
 trends, _, lb, ub, pvals = stats.trend_bs(
     accum_BIG, 1000, df_err=MoE_BIG, 
     pval=True, n_samples=n_sigfig)
+
 gdf_BIG['trend'] = trends
 gdf_BIG['t_lb'] = lb
 gdf_BIG['t_ub'] = ub

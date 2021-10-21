@@ -35,6 +35,7 @@ def trend_bs(
     intercepts = pd.DataFrame(columns=df.columns)
 
     # If no errors exist, create neutral weights
+
     if df_err.empty:
         df_err = pd.DataFrame(
             np.ones(df.shape), index=df.index, 
@@ -200,7 +201,6 @@ def vario(
             if i < j < m:
                 i_idx[m*i + j - ((i + 2)*(i + 1))//2] = i
                 j_idx[m*i + j - ((i + 2)*(i + 1))//2] = j
-
     
     # Create dfs for paired-point values
     i_vals = points_gdf[vars].iloc[i_idx].reset_index(
