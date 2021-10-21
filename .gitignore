@@ -200,3 +200,6 @@ docs/Figures/*
 
 # Other misc. file formats to ignore
 *.zip
+
+# Ignore word processor documents
+*.docx
