@@ -13,11 +13,14 @@ dependencies:
   - xlrd
   - phantomjs
   - pillow
-  - selenium
   - firefox
   - geckodriver
   - plotly
   - seaborn
   - xarray
   - rasterio
+  - openpyxl
+  - selenium
+  - xarray-spatial
+  - richdem
 prefix: /home/durbank/miniconda3/envs/wais-central
