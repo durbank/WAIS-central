@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
-import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import holoviews as hv
 hv.extension('bokeh', 'matplotlib')
@@ -28,7 +27,8 @@ from my_mods import spat_ops as so
 # %% Import and format radar data
 
 # Import and format PAIPR results
-dir1 = ROOT_DIR.joinpath('data/PAIPR-outputs/20111109/')
+dir1 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20111109/smb')
 data_raw = paipr.import_PAIPR(dir1)
 data_raw.query('QC_flag != 2', inplace=True)
 data_0 = data_raw.query(
@@ -43,7 +43,8 @@ std_ALL = paipr_data.pivot(
     index='Year', columns='trace_ID', values='std')
 
 # Import and format manual results
-dir_0 = ROOT_DIR.joinpath('data/smb_manual/20111109/')
+dir_0 = ROOT_DIR.joinpath(
+    'data/PAIPR-repeat/20111109/smb-manual/')
 data_0 = paipr.import_PAIPR(dir_0)
 man_data = paipr.format_PAIPR(
     data_0, start_yr=1980, end_yr=2010).drop(
@@ -150,8 +151,6 @@ accum_paipr = paipr_ALL.iloc[
     :,gdf_paipr.iloc[dist_overlap.index]['trace_ID']]
 std_paipr = std_ALL.iloc[
     :,gdf_paipr.iloc[dist_overlap.index]['trace_ID']]
-# accum_paipr = paipr_ALL.iloc[:,gdf_paipr['trace_ID']]
-# std_paipr = std_ALL.iloc[:,gdf_paipr['trace_ID']]
 accum_man = man_ALL.iloc[:,dist_overlap['trace_ID']]
 std_man = manSTD_ALL.iloc[:,dist_overlap['trace_ID']]
 
@@ -268,7 +267,7 @@ one2one_plts = (
     + one2one.opts(color='black')*scatter_2
 )
 
-
+one2one_plts
 
 
 # %% Subset results to matched pairs for cores only
