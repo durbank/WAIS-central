@@ -203,3 +203,4 @@ docs/Figures/*
 
 # Ignore word processor documents
 *.docx
+*.doc

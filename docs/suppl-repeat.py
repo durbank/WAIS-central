@@ -7,17 +7,11 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
-import matplotlib.pyplot as plt
 import geoviews as gv
 import holoviews as hv
 from cartopy import crs as ccrs
-from shapely.geometry import Point
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
-import panel as pn
-import seaborn as sns
-import xarray as xr
-from xrspatial import hillshade
 
 # Define plotting projection to use
 ANT_proj = ccrs.SouthPolarStereo(true_scale_latitude=-71)
@@ -29,7 +23,7 @@ ROOT_DIR = Path(__file__).parents[1]
 import sys
 SRC_DIR = ROOT_DIR.joinpath('src')
 sys.path.append(str(SRC_DIR))
-from my_mods import paipr, rema, viz, stats
+from my_mods import paipr
 from my_mods import spat_ops as so
 
 # %%
@@ -41,9 +35,7 @@ def grsl_clean(
     # Import PAIPR results
     data_raw = paipr.import_PAIPR(data_dir)
     data_raw.query('QC_flag < @cut_QC', inplace=True)
-    # data_0 = data_raw.query(
-    #     'Year > QC_yr').sort_values(
-    #     ['collect_time', 'Year']).reset_index(drop=True)
+
     data_0 = data_raw.sort_values(
         ['collect_time', 'Year']).reset_index(drop=True)
     data = paipr.format_PAIPR(
@@ -73,7 +65,7 @@ aPIG2016_ALL, stdPIG2016_ALL, gdf_PIG2016 = grsl_clean(
         'data/PAIPR-repeat/20161104/smb'), 
     start_yr=2004, end_yr=2008, yr_clip=False, rm_deep=True)
 
-# Find nearest neighbors between 2011 and 2016 
+# Find nearest neighbors between 2009 and 2016 
 # (within 500 m)
 df_dist = so.nearest_neighbor(
     gdf_PIG2009, gdf_PIG2016, return_dist=True)
@@ -122,7 +114,6 @@ plt_res = gv.Points(
         projection=ANT_proj, color='accum_res', size=12,
         bgcolor='silver', 
         colorbar=True, 
-        # cmap='seismic_r', 
         cmap='BrBG',
         symmetric=True, tools=['hover'], 
         width=750, height=750)

@@ -14,7 +14,6 @@ from cartopy import crs as ccrs
 from shapely.geometry import Point
 hv.extension('bokeh', 'matplotlib')
 gv.extension('bokeh', 'matplotlib')
-import panel as pn
 import seaborn as sns
 import xarray as xr
 from xrspatial import hillshade
@@ -126,17 +125,6 @@ chunk_centers = gpd.GeoDataFrame({
             -4.639E5, -4.639E5]), 
     crs="EPSG:3031")
 
-# # Assign flight chunk label based on location
-# chunk_centers = gpd.GeoDataFrame({
-#     'Site': ['PIG', 'A', 'B', 'C', 'D', 'E', 'F'],
-#     'Name': ['PIG', 'A', 'B', 'C', 'D', 'E', 'F']},
-#     geometry=gpd.points_from_xy(
-#         [-1.297E6, -1.177E6, -1.115E6, -1.024E6, 
-#             -1.093E6, -1.159E6, -1.263E6], 
-#         [-1.409E5, -2.898E5, -3.681E5, -4.639E5, 
-#             -4.639E5, -4.640E5, -4.668E5]), 
-#     crs="EPSG:3031")
-
 #%% Data map components
 
 # Accumulation plots for both flights
@@ -243,8 +231,10 @@ hill_plt = hv.Image(xr_HS.values, bounds=tpl_bnds).opts(
 
 # %% Get ice velocities of trace locations
 
-xr_vice = xr.open_dataset(ROOT_DIR.joinpath(
-    'data/ice-velocities/antarctica_ice_velocity_450m_v2.nc'))
+xr_vice = xr.open_dataset(
+    ROOT_DIR.joinpath(
+        'data/ice-velocities/', 
+        'antarctica_ice_velocity_450m_v2.nc'))
 xr_clip = xr_vice.sel(
     x=slice(
         gdf_PAIPR.total_bounds[0], 
@@ -260,11 +250,13 @@ vice_pts = gpd.GeoDataFrame(
 vice_pts['Vxy'] = np.sqrt(
     vice_pts['VX']**2 + vice_pts['VY']**2)
 
-gv.Points(vice_pts, crs=ANT_proj, 
+vice_plt = gv.Points(vice_pts, crs=ANT_proj, 
 vdims=['Vxy', 'VX', 'VY']).opts(
     projection=ANT_proj, color='Vxy', cmap='viridis', 
     size=10, colorbar=True, logz=True,
     width=800, height=800, tools=['hover'])
+
+vice_plt
 
 # %% PAIPR residuals
 
@@ -307,7 +299,7 @@ plt_res = gv.Points(
 
 
 plt_res = plt_res.redim.range(accum_res=(res_min,res_max))
-# plt_res
+plt_res
 
 # %% Bias trend with QC rating
 
@@ -389,7 +381,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     width=600, height=600, fontscale=1.75)
 
 paipr_1to1_plt_comb = paipr_1to1_plt + site_res_plt
-# paipr_1to1_plt_comb
+paipr_1to1_plt_comb
 
 # %%[markdown]
 # ## 2011 PAIPR-manual comparions
@@ -677,7 +669,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     width=600, height=600, fontscale=1.75)
 
 PM_1to1_comb_plt = PM_1to1_plt + site_res_plt
-# PM_1to1_comb_plt
+PM_1to1_comb_plt
 
 # %%[markdown]
 # ## Manual repeatability tests
@@ -852,7 +844,7 @@ site_res_plt = one_to_one.opts(color='black')*scatt_yr.opts(
     width=600, height=600, fontscale=1.75)
 
 man_1to1_comb_plt = man_1to1_plt + site_res_plt
-# man_1to1_comb_plt
+man_1to1_comb_plt
 
 # %%
 
@@ -861,8 +853,6 @@ tsfig_PAIPR = viz.plot_TScomp(
     yaxis=True, xlims=[1990,2010], ylims=[80,700],
     labels=['2011 PAIPR', '2016 PAIPR'], 
     ts_err1=std_2011, ts_err2=std_2016)
-
-
 
 
 # %%[markdown]
@@ -1093,13 +1083,9 @@ pplt_plane = replace_labs(pplt2, lab_replace)
 # 
 # %%
 
-# PAIPR_df = PAIPR_df.query("Site != 'Null'")
-
 
 PAP_man_df = PAP_man_df.query("Site != 'Null'")
 man_df = man_df.query("Site != 'Null'")
-# PAP_man_df = PAP_man_df.query("Site != 'B'")
-# man_df = man_df.query("Site != 'B'")
 
 df_2011 = PAP_man_df.query('flight==2011')
 df_2016 = PAP_man_df.query('flight==2016')
