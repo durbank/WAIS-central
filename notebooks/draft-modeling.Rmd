@@ -60,99 +60,12 @@ library(INLAutils)
 library(spdep)
 ```
 
-## Data loading and pre-processing
-
-```{r data-load, message=FALSE}
-data_long = read_csv(here('data/paipr-long.csv')) %>% select(-...1) %>% 
-  mutate(Year = as.integer(Year))
-gdf_traces = st_read(here('data/traces.geojson')) %>% as_tibble() %>% st_as_sf()
-
-# Remove points in far northern extent
-accum_bnds = st_coordinates(gdf_traces)
-gdf_traces = gdf_traces %>% st_crop(xmin=-1.5e6, xmax=max(accum_bnds[,1]),
-                                    ymin=min(accum_bnds[,2]), ymax=max(accum_bnds[,2]))
-
-
-# Small-scale testing bounds
-gdf_traces = gdf_traces %>% st_crop(xmin=-1.4e6, xmax=-1.25e6,
-                                    ymin=min(accum_bnds[,2]), ymax=-3e5)
-
-
-
-# Remove unrealistically high elevations and overly large accum sites
-trace_drop = gdf_traces %>% filter(elev > 3000 | accum > 1000)
-
-# Add East/North coordinates and drop filtered sites
-pts_tmp = st_coordinates(gdf_traces)
-coord_df = tibble(trace_ID = gdf_traces$trace_ID, East = pts_tmp[,1], North = pts_tmp[,2])
-data = data_long %>% left_join(coord_df) %>% filter(!trace_ID %in% trace_drop$trace_ID)
-gdf_traces = gdf_traces %>% filter(!trace_ID %in% trace_drop$trace_ID)
-```
-
-We need to import the other covariate data for the region.
-This consists of topographic features from REMA and climatic variables from RACMO.
+## Data loading
 ```{r}
-REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m")
-dem = rast(file.path(REMA.dir, "REMA_200m_dem.tif"))
-crs(dem) = st_crs(gdf_traces)$wkt
-
-slp = rast(file.path(REMA.dir, "REMA_200m_slope.tif"))
-crs(slp) = crs(dem)
-
-aspct = rast(file.path(REMA.dir, "REMA_200m_aspect.tif"))
-crs(aspct) = crs(dem)
-
-topo.stk = c(dem, slp, aspct)
-
-topo.pts = extract(topo.stk, vect(gdf_traces$geometry)) %>% as_tibble() %>% 
-  rename(dem=REMA_200m_dem) %>% 
-  mutate(trace.ID=gdf_traces$trace_ID, aspect=sin(pi/180*aspect))
-topo.pts = topo.pts %>% select(-ID)
-
-
-
-RACMO.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data", 
-                      "/RACMO/2.3p2_yearly_ANT27_1979_2016/interim")
-files = list.files(path = RACMO.dir, full.names = TRUE, 
-                   pattern = "\\.tif$")
-
-r.smb = rast(files[1])
-names(r.smb) = 1979:2016
-smb.pts = extract(r.smb, vect(gdf_traces$geometry)) %>% 
-  as_tibble() %>% mutate(trace.ID=gdf_traces$trace_ID) %>% 
-  pivot_longer(cols = num_range(prefix='', range=1979:2016), 
-               names_to = 'Year', values_to = 'SMB') %>% 
-  mutate(Year = as.integer(Year))
-
-
-r.u10m = rast(files[2])
-names(r.u10m) = 1979:2016
-u10m.pts = extract(r.u10m, vect(gdf_traces$geometry)) %>% 
-  as_tibble() %>% 
-  pivot_longer(cols = num_range(prefix='', range=1979:2016), 
-               names_to = 'Year', values_to = 'u10m') %>% 
-  mutate(Year = as.integer(Year))
-
-
-r.v10m = rast(files[3])
-names(r.v10m) = 1979:2016
-v10m.pts = extract(r.v10m, vect(gdf_traces$geometry)) %>% 
-  as_tibble() %>% pivot_longer(cols = num_range(prefix='', range=1979:2016), 
-                               names_to = 'Year', values_to = 'v10m') %>% 
-  mutate(Year = as.integer(Year))
-
-racmo.pts = smb.pts %>% 
-  mutate(u10m=u10m.pts$u10m, v10m=v10m.pts$v10m) %>% 
-  select(-ID)
-
-data = data %>% 
-  left_join(racmo.pts, by = c("trace_ID" = "trace.ID", "Year")) %>% 
-  left_join(topo.pts, by = c("trace_ID" = "trace.ID"))
-
-# data = data %>% mutate(S_x = abs(slope)*cos(asin(aspect)), 
-#                        S_y = abs(slope)*aspect) %>% 
-#   mutate(MSWD = S_x*u10m + S_y*v10m)
+data = readRDS(here('data/Rdata-clean.rds'))
+gdf_traces = readRDS(here('data/Rdata-gdf_trace.rds'))
 ```
+
 
 While I am testing/developing things, I'm only using a small subset of the data (around 1/2 a percent).
 This still gives a few thousand observations to work with though.
@@ -162,22 +75,33 @@ I center this covariate about its mean and also normalize the discrete time dime
 
 ```{r}
 set.seed(777)
-gdf.tmp = gdf_traces %>% sample_frac(0.01)
-data.tmp = data %>% filter(trace_ID %in% gdf.tmp$trace_ID) %>% 
-  filter(Year >= 1979) %>% filter(Year < 1999) %>% arrange(trace_ID, Year)
+gdf_traces = gdf_traces %>% sample_frac(0.01)
+data = data %>% filter(trace_ID %in% gdf_traces$trace_ID) %>% 
+  filter(Year >= 1979) %>% filter(Year < 2014) %>% arrange(trace_ID, Year)
+```
 
+
+We next subset to the variables of interest, center, standardize/normalize the covariates, and perform a train/test split.
+```{r}
 # Select variables of interest
-dat = data.tmp %>% select(trace_ID, East, North, Year, accum, 
-                      std, elev, dem, slope, aspect, u10m, v10m)
-# dat = data %>% select(trace_ID, East, North, Year, accum, 
-#                       std, elev, dem, slope, aspect, u10m, v10m)
+dat = data %>% select(trace_ID, East, North, Year, accum, 
+                      std, elev, dem, slope, aspect, u10m, v10m, 
+                      mu.u10, mu.v10)
 
 # Center covariates
 yr.min = min(dat$Year)-1
 dat = dat %>% 
   mutate(Year = Year-yr.min, elev = elev-mean(elev, na.rm=TRUE), 
          dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE), 
-         u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
+         u10m=u10m-mean(u10m, na.rm=TRUE), v10m=v10m-mean(v10m, na.rm=TRUE), 
+         mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE))
+         # u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
+
+# Scale covariates by sd
+dat = dat %>% 
+  mutate(Year = Year, elev = elev/sd(elev), dem=dem/sd(dem), 
+         slope=slope/sd(slope), u10m=u10m/sd(u10m), v10m=v10m/sd(v10m), 
+         mu.u10=sd(mu.u10), mu.v10=sd(mu.v10))
 
 # Split into training and testing sets
 dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
@@ -195,183 +119,183 @@ plot(mesh)
 points(dat.train %>% select(East, North), col = "red")
 ```
 
-I then define the SPDE object and create the identifier matrix $A$.
-**Question: Am I defining these priors correctly? I'm using the PC priors, which I think are defined in the untransformed spatial scale if I followed things right.**
-```{r}
-spde = inla.spde2.pcmatern(mesh = mesh, 
-  prior.range = c(10000, 0.05), # P(range < 10 km) = 0.05
-  prior.sigma = c(400, 0.05)) # P(sigma > 400 mm w.e.) = 0.05
-# iset = inla.spde.make.index('i', n.spde = spde$n.spde,
-#   n.group = max(dat$Year))
+<!-- I then define the SPDE object and create the identifier matrix $A$. -->
+<!-- **Question: Am I defining these priors correctly? I'm using the PC priors, which I think are defined in the untransformed spatial scale if I followed things right.** -->
+<!-- ```{r} -->
+<!-- spde = inla.spde2.pcmatern(mesh = mesh,  -->
+<!--   prior.range = c(10000, 0.05), # P(range < 10 km) = 0.05 -->
+<!--   prior.sigma = c(400, 0.05)) # P(sigma > 400 mm w.e.) = 0.05 -->
+<!-- # iset = inla.spde.make.index('i', n.spde = spde$n.spde, -->
+<!-- #   n.group = max(dat$Year)) -->
 
-# Create projector matrix for SPDE mesh
-A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
+<!-- # Create projector matrix for SPDE mesh -->
+<!-- A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North)) -->
 
-# Assign index vectors for SPDE model
-spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde)
+<!-- # Assign index vectors for SPDE model -->
+<!-- spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde) -->
 
-# Make data stack
-dat.stack <- inla.stack(
-  data = list(y = dat.train$accum), 
-  A = list(1, 1, 1, A.spat),
-  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
-                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
-                        slope=dat.train$slope, aspect=dat.train$aspect, 
-                        u10m=dat.train$u10m, v10m=dat.train$v10m), 
-                 list(time = dat.train$Year), 
-                 spat.idx),
-  tag = 'dat') 
-```
+<!-- # Make data stack -->
+<!-- dat.stack <- inla.stack( -->
+<!--   data = list(y = dat.train$accum),  -->
+<!--   A = list(1, 1, 1, A.spat), -->
+<!--   effects = list(list(Intercept = rep(1, nrow(dat.train))),  -->
+<!--                  tibble(elev = dat.train$elev, dem=dat.train$dem,  -->
+<!--                         slope=dat.train$slope, aspect=dat.train$aspect,  -->
+<!--                         u10m=dat.train$u10m, v10m=dat.train$v10m),  -->
+<!--                  list(time = dat.train$Year),  -->
+<!--                  spat.idx), -->
+<!--   tag = 'dat')  -->
+<!-- ``` -->
 
-I also define a PC-prior for the autoregressive temporal autocorrelation.
-In particular, I assume that $P(corr > 0) = 0.9$, indicating a high degree of confidence that some temporal autocorrelation exists in our data.
-**Questions: I want to make sure I am defining the priors properly, so let me know what could be improved here. Also, I am currently modeling this as a separable spacetime model with independent random effects for space and time. I largely followed the first example in Section 8.6.1 in [Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/ch-temporal.html#separable-models). It also shows an example of doing this using a grouping method which I think might incorporate some interactions between space and time autocorrelations, but the fully indepedent separable model is MUCH faster.**
-```{r}
-## Define other priors (spatial field priors defined earlier)
+<!-- I also define a PC-prior for the autoregressive temporal autocorrelation. -->
+<!-- In particular, I assume that $P(corr > 0) = 0.9$, indicating a high degree of confidence that some temporal autocorrelation exists in our data. -->
+<!-- **Questions: I want to make sure I am defining the priors properly, so let me know what could be improved here. Also, I am currently modeling this as a separable spacetime model with independent random effects for space and time. I largely followed the first example in Section 8.6.1 in [Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/ch-temporal.html#separable-models). It also shows an example of doing this using a grouping method which I think might incorporate some interactions between space and time autocorrelations, but the fully indepedent separable model is MUCH faster.** -->
+<!-- ```{r} -->
+<!-- ## Define other priors (spatial field priors defined earlier) -->
 
-# Prior on autoregressive rho parameter
-time.spec = list(rho = list(prior = 'pc.cor1', param = c(0, 0.9)))
+<!-- # Prior on autoregressive rho parameter -->
+<!-- time.spec = list(rho = list(prior = 'pc.cor1', param = c(0, 0.9))) -->
 
-# Prior on fixed effects intercept (not currently implemented)
-prior.fixed = list()
+<!-- # Prior on fixed effects intercept (not currently implemented) -->
+<!-- prior.fixed = list() -->
 
-# Prior on precision parameter for Gamma observations
-prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+<!-- # Prior on precision parameter for Gamma observations -->
+<!-- prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10% -->
 
-# Model formula
-formula = y ~ -1 + 
-  Intercept + dem + slope + aspect + #fixed effects
-  slope*aspect + #fixed effects interactions
-  f(time, model = 'ar1', hyper = time.spec) + #temporal random effect
-  f(spat.field, model = spde) #spatial random effect
-```
+<!-- # Model formula -->
+<!-- formula = y ~ -1 +  -->
+<!--   Intercept + dem + slope + aspect + #fixed effects -->
+<!--   slope*aspect + #fixed effects interactions -->
+<!--   f(time, model = 'ar1', hyper = time.spec) + #temporal random effect -->
+<!--   f(spat.field, model = spde) #spatial random effect -->
+<!-- ``` -->
 
-```{r}
-# Model fitting
-system.time(
-  mod.sep_ind <- inla(formula, 
-                  data = inla.stack.data(dat.stack), 
-                  family = 'Gamma',
-                  quantiles = NULL, 
-                  control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1), 
-                  # control.fixed = prior.fixed, 
-                  control.family = list(hyper = list(prec = prec.prior)), 
-                  control.compute = list(waic = TRUE, return.marginals.predictor=FALSE, config=TRUE))
-)
-```
+<!-- ```{r} -->
+<!-- # Model fitting -->
+<!-- system.time( -->
+<!--   mod.sep_ind <- inla(formula,  -->
+<!--                   data = inla.stack.data(dat.stack),  -->
+<!--                   family = 'Gamma', -->
+<!--                   quantiles = NULL,  -->
+<!--                   control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1),  -->
+<!--                   # control.fixed = prior.fixed,  -->
+<!--                   control.family = list(hyper = list(prec = prec.prior)),  -->
+<!--                   control.compute = list(waic = TRUE, return.marginals.predictor=FALSE, config=TRUE)) -->
+<!-- ) -->
+<!-- ``` -->
 
-### Form 2
+<!-- ### Form 2 -->
 
-Rather than treating space and time wholly independently, we can also model the spatial component at each time step separately.
-This still does not include interactions between space and time effects, but does allow the spatial dependence to vary over time.
-The following implementation follows examples shown in  Section 8.6.2 in [Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/ch-temporal.html#separable-models) amd Section 7.1 of [Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA](https://becarioprecario.bitbucket.io/spde-gitbook/ch-spacetime.html#discrete-time-domain).
+<!-- Rather than treating space and time wholly independently, we can also model the spatial component at each time step separately. -->
+<!-- This still does not include interactions between space and time effects, but does allow the spatial dependence to vary over time. -->
+<!-- The following implementation follows examples shown in  Section 8.6.2 in [Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/ch-temporal.html#separable-models) amd Section 7.1 of [Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA](https://becarioprecario.bitbucket.io/spde-gitbook/ch-spacetime.html#discrete-time-domain). -->
 
-```{r}
-set.seed(777)
-gdf.tmp = gdf_traces %>% sample_frac(0.005)
-data.tmp = data %>% filter(trace_ID %in% gdf.tmp$trace_ID) %>% 
-  filter(Year >= 1989) %>% filter(Year < 1999) %>% arrange(trace_ID, Year)
+<!-- ```{r} -->
+<!-- set.seed(777) -->
+<!-- gdf.tmp = gdf_traces %>% sample_frac(0.005) -->
+<!-- data.tmp = data %>% filter(trace_ID %in% gdf.tmp$trace_ID) %>%  -->
+<!--   filter(Year >= 1989) %>% filter(Year < 1999) %>% arrange(trace_ID, Year) -->
 
-# Select variables of interest
-dat = data.tmp %>% select(trace_ID, East, North, Year, accum, 
-                      std, elev, dem, slope, aspect, u10m, v10m)
-# dat = data %>% select(trace_ID, East, North, Year, accum, 
-#                       std, elev, dem, slope, aspect, u10m, v10m)
+<!-- # Select variables of interest -->
+<!-- dat = data.tmp %>% select(trace_ID, East, North, Year, accum,  -->
+<!--                       std, elev, dem, slope, aspect, u10m, v10m) -->
+<!-- # dat = data %>% select(trace_ID, East, North, Year, accum,  -->
+<!-- #                       std, elev, dem, slope, aspect, u10m, v10m) -->
 
-# Center covariates
-yr.min = min(dat$Year)-1
-dat = dat %>% 
-  mutate(Year = Year-yr.min, elev = elev-mean(elev, na.rm=TRUE), 
-         dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE), 
-         u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
+<!-- # Center covariates -->
+<!-- yr.min = min(dat$Year)-1 -->
+<!-- dat = dat %>%  -->
+<!--   mutate(Year = Year-yr.min, elev = elev-mean(elev, na.rm=TRUE),  -->
+<!--          dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE),  -->
+<!--          u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE)) -->
 
-# Split into training and testing sets
-dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
-dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
-dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
-```
-
-
-```{r}
-mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
-                    max.edge = c(25000, 100000), cutoff = 7500)
-
-spde = inla.spde2.pcmatern(mesh = mesh, 
-  prior.range = c(10000, 0.05), # P(range < 10 km) = 0.05
-  prior.sigma = c(400, 0.05)) # P(sigma > 400 mm w.e.) = 0.05
-
-# Create projector matrix for SPDE mesh
-A.spat = inla.spde.make.A(mesh = mesh,
-                          loc = cbind(dat.train$East, dat.train$North),
-                          group = dat.train$Year)
-A.year = inla.spde.make.A(mesh = mesh,
-                          loc = cbind(dat.train$East, dat.train$North))
-
-# Assign index vectors for SPDE model
-spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde,
-                                n.group = length(unique(dat.train$Year)))
-
-# Assign index vectors for SPDE model for year covariate
-year.idx = inla.spde.make.index(name = "year.diff", n.spde = spde$n.spde)
-
-# Make data stack
-# dat.stack <- inla.stack(
-#   data = list(y = dat.train$accum),
-#   A = list(1, 1, 1, A.spat),
-#   effects = list(list(Intercept = rep(1, nrow(dat.train))),
-#                  tibble(elev = dat.train$elev, dem=dat.train$dem,
-#                         slope=dat.train$slope, aspect=dat.train$aspect,
-#                         u10m=dat.train$u10m, v10m=dat.train$v10m),
-#                  list(time = dat.train$Year),
-#                  spat.idx),
-#   tag = 'dat')
-dat.stack = inla.stack(
-  data = list(y = dat.train$accum),
-  A = list(1, 1, A.spat, A.year),
-  effects = list(list(Intercept = rep(1, nrow(dat.train))),
-                 tibble(elev = dat.train$elev, dem=dat.train$dem,
-                        slope=dat.train$slope, aspect=dat.train$aspect,
-                        u10m=dat.train$u10m, v10m=dat.train$v10m, 
-                        year=dat.train$Year),
-                 spat.idx, 
-                 year.idx), 
-  tag = 'dat')
+<!-- # Split into training and testing sets -->
+<!-- dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID) -->
+<!-- dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID) -->
+<!-- dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID) -->
+<!-- ``` -->
 
 
-# Prior on autoregressive rho parameter
-time.spec = list(rho = list(prior = 'pc.cor1', param = c(0, 0.9)))
+<!-- ```{r} -->
+<!-- mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),  -->
+<!--                     max.edge = c(25000, 100000), cutoff = 7500) -->
 
-# Prior on fixed effects intercept (not currently implemented)
-prior.fixed = list()
+<!-- spde = inla.spde2.pcmatern(mesh = mesh,  -->
+<!--   prior.range = c(10000, 0.05), # P(range < 10 km) = 0.05 -->
+<!--   prior.sigma = c(400, 0.05)) # P(sigma > 400 mm w.e.) = 0.05 -->
 
-# Prior on precision parameter for Gamma observations
-prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+<!-- # Create projector matrix for SPDE mesh -->
+<!-- A.spat = inla.spde.make.A(mesh = mesh, -->
+<!--                           loc = cbind(dat.train$East, dat.train$North), -->
+<!--                           group = dat.train$Year) -->
+<!-- A.year = inla.spde.make.A(mesh = mesh, -->
+<!--                           loc = cbind(dat.train$East, dat.train$North)) -->
 
-# Model formula
-formula = y ~ -1 +
-  Intercept + dem + slope + aspect + #fixed effects
-  # slope*aspect + #fixed effects interactions
-  f(spat.field, model = spde, group = spat.field.group,
-    control.group = list(model = 'ar1', hyper = time.spec)) + 
-  f(year.diff, year, model = spde, constr = FALSE)
+<!-- # Assign index vectors for SPDE model -->
+<!-- spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde, -->
+<!--                                 n.group = length(unique(dat.train$Year))) -->
 
-# Model fitting
-system.time(
-  mod.sep_group <- inla(formula,
-                  data = inla.stack.data(dat.stack),
-                  family = 'Gamma',
-                  quantiles = NULL,
-                  control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1),
-                  # control.fixed = prior.fixed,
-                  control.family = list(hyper = list(prec = prec.prior)),
-                  control.compute = list(waic = TRUE, return.marginals.predictor=FALSE, config=TRUE))
-)
-```
+<!-- # Assign index vectors for SPDE model for year covariate -->
+<!-- year.idx = inla.spde.make.index(name = "year.diff", n.spde = spde$n.spde) -->
 
-On a (very) small testing set (use commented section in `data-load` chunk) of ~100 locations, the grouped separable model does perform substantially better based on WAIC score, but at the cost of around 50x the computation time (this difference may be even larger on a larger dataset).
-Fitted fixed effects are of a similar magnitude between the two models.
-This model produces greater precision in the gamma observations and roughly similar hyperparameters for the spatial field (this model has a higher range but lower range variance compared to the independent separable model).
-I'll need think more about what the GroupRho parameter for the spatial field means, and how it compares to the independent separable model.
+<!-- # Make data stack -->
+<!-- # dat.stack <- inla.stack( -->
+<!-- #   data = list(y = dat.train$accum), -->
+<!-- #   A = list(1, 1, 1, A.spat), -->
+<!-- #   effects = list(list(Intercept = rep(1, nrow(dat.train))), -->
+<!-- #                  tibble(elev = dat.train$elev, dem=dat.train$dem, -->
+<!-- #                         slope=dat.train$slope, aspect=dat.train$aspect, -->
+<!-- #                         u10m=dat.train$u10m, v10m=dat.train$v10m), -->
+<!-- #                  list(time = dat.train$Year), -->
+<!-- #                  spat.idx), -->
+<!-- #   tag = 'dat') -->
+<!-- dat.stack = inla.stack( -->
+<!--   data = list(y = dat.train$accum), -->
+<!--   A = list(1, 1, A.spat, A.year), -->
+<!--   effects = list(list(Intercept = rep(1, nrow(dat.train))), -->
+<!--                  tibble(elev = dat.train$elev, dem=dat.train$dem, -->
+<!--                         slope=dat.train$slope, aspect=dat.train$aspect, -->
+<!--                         u10m=dat.train$u10m, v10m=dat.train$v10m,  -->
+<!--                         year=dat.train$Year), -->
+<!--                  spat.idx,  -->
+<!--                  year.idx),  -->
+<!--   tag = 'dat') -->
+
+
+<!-- # Prior on autoregressive rho parameter -->
+<!-- time.spec = list(rho = list(prior = 'pc.cor1', param = c(0, 0.9))) -->
+
+<!-- # Prior on fixed effects intercept (not currently implemented) -->
+<!-- prior.fixed = list() -->
+
+<!-- # Prior on precision parameter for Gamma observations -->
+<!-- prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10% -->
+
+<!-- # Model formula -->
+<!-- formula = y ~ -1 + -->
+<!--   Intercept + dem + slope + aspect + #fixed effects -->
+<!--   # slope*aspect + #fixed effects interactions -->
+<!--   f(spat.field, model = spde, group = spat.field.group, -->
+<!--     control.group = list(model = 'ar1', hyper = time.spec)) +  -->
+<!--   f(year.diff, year, model = spde, constr = FALSE) -->
+
+<!-- # Model fitting -->
+<!-- system.time( -->
+<!--   mod.sep_group <- inla(formula, -->
+<!--                   data = inla.stack.data(dat.stack), -->
+<!--                   family = 'Gamma', -->
+<!--                   quantiles = NULL, -->
+<!--                   control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1), -->
+<!--                   # control.fixed = prior.fixed, -->
+<!--                   control.family = list(hyper = list(prec = prec.prior)), -->
+<!--                   control.compute = list(waic = TRUE, return.marginals.predictor=FALSE, config=TRUE)) -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- On a (very) small testing set (use commented section in `data-load` chunk) of ~100 locations, the grouped separable model does perform substantially better based on WAIC score, but at the cost of around 50x the computation time (this difference may be even larger on a larger dataset). -->
+<!-- Fitted fixed effects are of a similar magnitude between the two models. -->
+<!-- This model produces greater precision in the gamma observations and roughly similar hyperparameters for the spatial field (this model has a higher range but lower range variance compared to the independent separable model). -->
+<!-- I'll need think more about what the GroupRho parameter for the spatial field means, and how it compares to the independent separable model. -->
 
 ### Direct temporal trend analysis
 
@@ -388,110 +312,189 @@ Additionally thoughts on doing this are found in this [R-inla discussion post](h
 The [section on dynamic space-time regression](https://becarioprecario.bitbucket.io/spde-gitbook/ch-stapp.html#dynamic-space-time-regression) in [Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA](https://becarioprecario.bitbucket.io/spde-gitbook/index.html) also discusses how to implement spatially-varying model coefficients in INLA.
 
 ```{r}
-
 mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
-                    max.edge = c(25000, 100000), cutoff = 1000)
+                    max.edge = c(25000, 75000), cutoff = 5000)
+plot(mesh)
+points(dat.train %>% select(East, North), col = "red")
 
 spde = inla.spde2.pcmatern(mesh = mesh, 
-  prior.range = c(10000, 0.05), # P(range < 10 km) = 0.05
-  prior.sigma = c(400, 0.05))
+  prior.range = c(15000, 0.01), # P(range < 10 km) = 0.01
+  prior.sigma = c(10, 0.05))
 
-# year.spde = inla.spde2.matern(mesh = mesh)
-year.spde = spde
+spde.yr = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(5000, 0.01), # P(range < 10 km) = 0.01
+  prior.sigma = c(1, 0.01), 
+  constr = TRUE)
 
-# Create projector matrix for SPDE mesh
-A.spat = inla.spde.make.A(mesh = mesh,
-                          loc = cbind(dat.train$East, dat.train$North))
+# Index for SPDE model and projector matrix
+spat.idx = inla.spde.make.index(name = "spat.idx", n.spde = spde$n.spde)
+A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
 
-# Assign index vectors for SPDE model
-spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde)
-
-# Assign index vectors for SPDE model for year covariate
-year.idx = inla.spde.make.index(name = "year.diff", n.spde = year.spde$n.spde)
+# Index for SPDE model and projector matrix
+spYR.idx = inla.spde.make.index(name = "spYR.idx", n.spde = spde.yr$n.spde)
+A.spYR = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
 
 # Make data stack
 dat.stack <- inla.stack(
-  data = list(y = dat.train$accum),
-  A = list(1, 1, A.spat, A.spat, 1),
-  effects = list(list(Intercept = rep(1, nrow(dat.train))),
-                 tibble(elev = dat.train$elev, dem=dat.train$dem,
-                        slope=dat.train$slope, aspect=dat.train$aspect,
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, 1, A.spat, A.spYR),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        slope=dat.train$slope, aspect=dat.train$aspect, 
                         u10m=dat.train$u10m, v10m=dat.train$v10m, 
-                        year=dat.train$Year),
-                 year.idx, 
+                        mu.u10=dat.train$mu.u10, mu.v10=dat.train$mu.v10, 
+                        Year=dat.train$Year), 
+                 list(time = dat.train$Year), 
                  spat.idx, 
-                 list(time = dat.train$Year)),
+                 spYR.idx),
   tag = 'dat')
 
 
-# Prior on precision parameter for Gamma observations
+time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
+prior.fixed = list()
 prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
 
-# Prior on autoregressive rho parameter
-time.spec = list(rho = list(prior = 'pc.cor1', param = c(0, 0.9)))
 
-# Model formula
-# formula = y ~ -1 + 
-#   Intercept + dem + slope + aspect + #fixed effects
-#   slope*aspect + #fixed effects interactions
-#   f(year.diff, year, model = "iid") + year + 
-#   f(spat.field, model = spde) + #spatial random effect
-#   f(time, model = 'ar1', hyper = time.spec)#temporal random effect
+# form.iid = y ~ -1 + Intercept + dem + slope + 
+#   # f(spat.idx, model = spde) + 
+#   Year + f(spat.idx, Year, model = spde.yr) +
+#   f(time, model = 'ar1', hyper = time.spec)
 
-formula = y ~ -1 + Intercept + 
-  dem + slope + aspect + #fixed effects
-  # f(time, model = 'ar1', hyper = time.spec) + #AR temporal random effect
-  # f(year.diff, year, model = spde, constr = FALSE) + #spatially varying temporal trend
-  year + f(year.diff, year, model = spde) + #spatially varying temporal trend
-  f(spat.field, model = spde) #spatial random effect
-  
-formula = y ~ -1 + 
-  f(spat.field, model = spde) + 
-  year + f(year.diff, year, model = spde)
-
-
-# Model fitting
-system.time(
-  mod.trends <- inla(formula,
-                  data = inla.stack.data(dat.stack),
-                  family = 'Gamma',
-                  quantiles = NULL,
-                  control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), 
-                                           link = 1),
-                  # control.fixed = prior.fixed,
-                  control.family = list(hyper = list(prec = prec.prior)),
-                  control.compute = list(waic = TRUE, return.marginals.predictor=FALSE,
-                                         config=TRUE))
-)
+form.iid = y ~ -1 + Intercept + dem + 
+  aspect + 
+  f(spat.idx, model = spde) +
+  Year + f(spYR.idx, Year, model = spde.yr) +
+  # f(spat.idx, Year, model = spde.yr) +
+  f(time, model = 'ar1', hyper = time.spec)
 ```
+
+```{r}
+mod.iid = inla(form.iid, 
+               data = inla.stack.data(dat.stack), 
+               family = 'Gamma',
+               quantiles = NULL, 
+               control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1), 
+               # control.fixed = prior.fixed, 
+               control.family = list(hyper = list(prec = prec.prior)), 
+               control.compute = list(waic=TRUE, return.marginals.predictor=TRUE, config=TRUE))
+
+```
+
+
+## Evalulate model performance
+
+```{r}
+summary(mod.iid)
+```
+
+
+```{r}
+
+t.marg = function(mod.marg, t.func, param.names=NULL, n=100) {
+  
+  if (any(class(mod.marg) == "matrix")) {
+    mod.marg = list(mod.marg)
+    if (!is.null(param.names)) {
+      names(mod.marg = param.names)
+    } else {
+      names(mod.marg) = "UNNAMED"
+    }
+  }
+  
+  if (is.null(param.names)) {
+    param.names = names(mod.marg)
+  }
+  
+    if (is.list(t.func) != TRUE) {
+    t.func = list(t.func)
+  }
+  if (length(t.func) == 1) {
+    t.func = rep(t.func, length(param.names))
+  }
+  
+  # Preallocate output tbl
+  out = tibble(x=numeric(), y=numeric(), Param=vector(mode="character"))
+  
+  marg.names = names(mod.marg)
+  
+  for (i in 1:length(marg.names)) {
+    marg.i = inla.tmarginal(t.func[[i]], mod.marg[[marg.names[i]]], n=n)
+    out = out %>% bind_rows(tibble(x=marg.i[,1], y=marg.i[,2], Param=param.names[i]))
+  }
+  return(out)
+}
+```
+
+```{r}
+marg.fixed = t.marg(mod.iid$marginals.fixed, function(x) exp(x))
+ggplot(marg.fixed, aes(x=x,y=y)) + geom_line() + facet_wrap(vars(Param), scales = "free")
+
+HP.names = c("Gamma precision", "Range for spat.idx", "Stdev for spat.idx", 
+             "Range for spYR.idx", "Stdev for spYR.idx", "Time precision", "Rho for time")
+marg.hyper = t.marg(mod.iid$marginals.hyperpar, function(x) (x), param.names = HP.names)
+ggplot(marg.hyper, aes(x=x,y=y)) + geom_line() + facet_wrap(vars(Param), scales = "free")
+```
+
+```{r}
+p.selection = c("Intercept", "dem", "aspect", "Gamma precision", "Range for spat.idx", 
+                "Stdev for spat.idx", "Time precision", "Rho for time")
+tmp = marg.fixed %>% bind_rows(marg.hyper) %>% filter(Param %in% p.selection)
+```
+```{r fig, fig.width=16}
+ggplot(tmp, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param), scales = "free") + 
+  theme(text = element_text(size = 20))  
+```
+
+
+
+```{r}
+Bi.sp = tibble(East = mesh$loc[,1], North = mesh$loc[,2], 
+                 B.i = mod.iid$summary.random$spYR.idx$mean) %>% 
+  mutate(B.tot = B.i+mod.iid$summary.fixed["Year",]$mean)
+ggplot(Bi.sp) + geom_density(aes(x=B.tot))
+# ggplot(Bi.sp) + geom_density(aes(x=B.i))
+
+```
+
+Compare results to a standard log-link gamma GLM to ensure correct interpretation
+```{r}
+# Formula without random variables
+f.base = y ~ -1 + Intercept + Year + dem + aspect
+
+# Fitting a frequentist GLM to data
+mod.glm = glm(f.base, data = dat.train %>% rename(y=accum) %>% mutate(Intercept=1), 
+               family = Gamma(link = "log"))
+
+summary(mod.glm)
+```
+
+All of this looks good except for when looking at the individual summaries spatial random effects on the temporal trend.
+In this case, the sd for individual estimates is some 4-5 orders of magnitude larger than the mean, making them virtually worthless.
+This is visually shown in the below plot (and recall that this is the untransformed values, so after exponentiation this just becomes ridiculous).
+```{r}
+plot(mod.iid$marginals.random$spYR.idx$index.7, type='l')
+```
+
+
 
 
 ```{r}
 
 fitted.idx = inla.stack.index(dat.stack, 'dat')$data
 
-test.fitted = tibble(mu = mod.trends$summary.fitted.values$mean[fitted.idx]) %>% 
+test.fitted = tibble(mu = mod.iid$summary.fitted.values$mean[fitted.idx]) %>% 
   bind_cols(dat.train %>% select(Year, East, North)) %>% 
   st_as_sf(coords=c("East", "North"), crs=st_crs(gdf_traces))
-test.rand = tibble(t.trend = exp(mod.trends$summary.random$year.diff$mean)-1, 
-                   spat.mu = exp(mod.trends$summary.random$spat.field$mean), 
+test.rand = tibble(t.trend = exp(mod.iid$summary.random$spYR.idx$mean + mod.iid$summary.fixed['Year',]$mean), 
+                   spat.mu = exp(mod.iid$summary.random$spat.idx$mode), 
                    East = mesh$loc[,1], North = mesh$loc[,2]) %>% 
   st_as_sf(coords=c("East", "North"), crs=st_crs(gdf_traces))
-ggplot(test.rand) + geom_sf(aes(color=t.trend)) + scale_color_viridis_c()
+ggplot(test.rand) + geom_sf(aes(color=spat.mu)) + scale_color_viridis_c()
 ```
 
 
 ## Model interpretation
-
-```{r}
-mod.train = mod.sep_ind
-```
-
-
-Below is a summary of the model results.
-```{r}
-summary(mod.train)
-```
 
 Here's a rundown of how I understand these results.
 Let me know if I'm missing something or there are otherwise gaps in my thought process.
@@ -525,167 +528,170 @@ A.test = inla.spde.make.A(mesh = mesh, loc = cbind(dat.test$East, dat.test$North
 # Create test data stack and join to data stack
 test.stack <- inla.stack(
   data = list(y = NA), 
-  A = list(1, 1, 1, A.test),
+  A = list(1, 1, 1, A.test, A.test),
   effects = list(list(Intercept = rep(1, nrow(dat.test))), 
                  tibble(elev = dat.test$elev, dem=dat.test$dem, 
                         slope=dat.test$slope, aspect=dat.test$aspect, 
-                        u10m=dat.test$u10m, v10m=dat.test$v10m),
+                        u10m=dat.test$u10m, v10m=dat.test$v10m,
+                        mu.u10=dat.test$mu.u10, mu.v10=dat.test$mu.v10, 
+                        Year=dat.test$Year), 
                  list(time = dat.test$Year), 
-                 spat.idx),
+                 spat.idx, 
+                 spYR.idx),
   tag = 'test')
 val.stack <- inla.stack(dat.stack, test.stack)
 
 # Model fitting to test data
-system.time(
-  mod.test <- inla(formula, 
-                  data = inla.stack.data(val.stack), 
-                  family = 'Gamma',
-                  quantiles = NULL, 
-                  control.predictor = list(compute = TRUE, A = inla.stack.A(val.stack), link = 1), 
-                  control.family = list(hyper = list(prec = prec.prior)), 
-                  control.inla = list(strategy = 'adaptive'), 
-                  control.mode = list(theta = results$mode$theta, restart = FALSE))
-)
+
+mod.test <- inla(form.iid, 
+                 data = inla.stack.data(val.stack), 
+                 family = 'Gamma',
+                 quantiles = NULL, 
+                 control.predictor = list(compute = TRUE, A = inla.stack.A(val.stack), link = 1), 
+                 control.family = list(hyper = list(prec = prec.prior)), 
+                 control.inla = list(strategy = 'adaptive'), 
+                 control.mode = list(theta = mod.iid$mode$theta, restart = FALSE))
+
 ```
 
-Below is a function that, given an input of mean estimates, sd on mean estimates, precision parameter for Gamma observations, and sd on precision parameter, returns $n$ samples from the posterior predictive distribution for the given inputs.
-```{r}
-pp.dist = function(data, prec, prec.sd, n=5000, return_sample=FALSE) {
-  if (return_sample==TRUE) {
-    ppd = matrix(data=NA, nrow=nrow(data), ncol=n)
-  } else {
-    ppd = tibble(mu=rep(0,nrow(data)), map=rep(0,nrow(data)), 
-                 CI.low=rep(0,nrow(data)), CI.high=rep(0,nrow(data)))
-  }
-  
-  for (i in 1:nrow(data)) {
-    dat.i = data[i,]
-    mu = rnorm(n, mean=dat.i$mu, sd=dat.i$mu.sd)
-    a = rnorm(n, mean=prec, sd=prec.sd)
-    b = a/mu
-    dist = rgamma(n=n, shape = a, rate = b)
-    
-    if (return_sample==TRUE) {
-      ppd[i,] = dist
-    } else {
-      dist.mu = mean(dist)
-      d = density(dist)
-      dist.map = d$x[which.max(d$y)]
-      dist.hdi = HDInterval::hdi(dist, credMass=0.89)
-      ppd[i,] = tibble_row(mu=dist.mu, map=dist.map, 
-                           CI.low=as.numeric(dist.hdi[1]), 
-                           CI.high=as.numeric(dist.hdi[2]))
-    }
-  }
-  return(ppd)
-}
-```
+<!-- Below is a function that, given an input of mean estimates, sd on mean estimates, precision parameter for Gamma observations, and sd on precision parameter, returns $n$ samples from the posterior predictive distribution for the given inputs. -->
+<!-- ```{r} -->
+<!-- pp.dist = function(data, prec, prec.sd, n=5000, return_sample=FALSE) { -->
+<!--   if (return_sample==TRUE) { -->
+<!--     ppd = matrix(data=NA, nrow=nrow(data), ncol=n) -->
+<!--   } else { -->
+<!--     ppd = tibble(mu=rep(0,nrow(data)), map=rep(0,nrow(data)),  -->
+<!--                  CI.low=rep(0,nrow(data)), CI.high=rep(0,nrow(data))) -->
+<!--   } -->
 
-This is an example of generating posterior predictive distributions for a couple of data points.
-**Am I doing this right?**
-```{r message=FALSE}
-# Get inla grid indices where test data resides
-test.idx = inla.stack.index(val.stack, 'test')$data
+<!--   for (i in 1:nrow(data)) { -->
+<!--     dat.i = data[i,] -->
+<!--     mu = rnorm(n, mean=dat.i$mu, sd=dat.i$mu.sd) -->
+<!--     a = rnorm(n, mean=prec, sd=prec.sd) -->
+<!--     b = a/mu -->
+<!--     dist = rgamma(n=n, shape = a, rate = b) -->
 
-# Create df of model predictions for test data
-test.fitted = tibble(mu = mod.test$summary.fitted.values$mean[test.idx], 
-                     mu.sd = mod.test$summary.fitted.values$sd[test.idx], 
-                     accum = dat.test$accum, accum.sd = dat.test$std)
+<!--     if (return_sample==TRUE) { -->
+<!--       ppd[i,] = dist -->
+<!--     } else { -->
+<!--       dist.mu = mean(dist) -->
+<!--       d = density(dist) -->
+<!--       dist.map = d$x[which.max(d$y)] -->
+<!--       dist.hdi = HDInterval::hdi(dist, credMass=0.89) -->
+<!--       ppd[i,] = tibble_row(mu=dist.mu, map=dist.map,  -->
+<!--                            CI.low=as.numeric(dist.hdi[1]),  -->
+<!--                            CI.high=as.numeric(dist.hdi[2])) -->
+<!--     } -->
+<!--   } -->
+<!--   return(ppd) -->
+<!-- } -->
+<!-- ``` -->
 
-# Create matrix of model posterior  samples for a few test data
-system.time(
-  post.pred_samp <- pp.dist(data=head(test.fitted), prec=mod.test$summary.hyperpar$mean[1], 
-                       prec.sd=mod.test$summary.hyperpar$sd[1], return_sample = TRUE)
-)
+<!-- This is an example of generating posterior predictive distributions for a couple of data points. -->
+<!-- **Am I doing this right?** -->
+<!-- ```{r message=FALSE} -->
+<!-- # Get inla grid indices where test data resides -->
+<!-- test.idx = inla.stack.index(val.stack, 'test')$data -->
 
-pp.samples = as_tibble(t(post.pred_samp), .name_repair = 'universal') %>%
-  rename(R1=...1, R2=...2, R3=...3, R4=...4, R5=...5, R6=...6) %>% 
-  mutate(Sample.ID = 1:ncol(post.pred_samp)) %>% 
-  pivot_longer(cols = starts_with("R"), names_to = "R.name", values_to = "accum.rvs")
+<!-- # Create df of model predictions for test data -->
+<!-- test.fitted = tibble(mu = mod.test$summary.fitted.values$mean[test.idx],  -->
+<!--                      mu.sd = mod.test$summary.fitted.values$sd[test.idx],  -->
+<!--                      accum = dat.test$accum, accum.sd = dat.test$std) -->
 
-accum.obs = tibble()
-for (i in 1:length(unique(pp.samples$R.name))) {
-  r.name = paste("R", i, sep = '')
-  accum.i = rnorm(max(pp.samples$Sample.ID), 
-                  mean=test.fitted$accum[i], 
-                  sd=test.fitted$accum.sd[i])
-  accum.obs = accum.obs %>% 
-    bind_rows(tibble(Sample.ID = 1:length(accum.i), R.name = r.name, 
-                     accum.obs = accum.i))
-}
+<!-- # Create matrix of model posterior  samples for a few test data -->
+<!-- system.time( -->
+<!--   post.pred_samp <- pp.dist(data=head(test.fitted), prec=mod.test$summary.hyperpar$mean[1],  -->
+<!--                        prec.sd=mod.test$summary.hyperpar$sd[1], return_sample = TRUE) -->
+<!-- ) -->
 
-pp.samples = pp.samples %>% left_join(accum.obs, by = c("R.name", "Sample.ID")) %>% 
-  mutate(R.name = as.factor(R.name))
+<!-- pp.samples = as_tibble(t(post.pred_samp), .name_repair = 'universal') %>% -->
+<!--   rename(R1=...1, R2=...2, R3=...3, R4=...4, R5=...5, R6=...6) %>%  -->
+<!--   mutate(Sample.ID = 1:ncol(post.pred_samp)) %>%  -->
+<!--   pivot_longer(cols = starts_with("R"), names_to = "R.name", values_to = "accum.rvs") -->
 
-# ggplot(pp.samples) + 
-#   geom_density(aes(x=accum.rvs, color=ROW, fill=ROW), alpha=0.1) + 
-#   xlab('Posterior predictive accumulation')
+<!-- accum.obs = tibble() -->
+<!-- for (i in 1:length(unique(pp.samples$R.name))) { -->
+<!--   r.name = paste("R", i, sep = '') -->
+<!--   accum.i = rnorm(max(pp.samples$Sample.ID),  -->
+<!--                   mean=test.fitted$accum[i],  -->
+<!--                   sd=test.fitted$accum.sd[i]) -->
+<!--   accum.obs = accum.obs %>%  -->
+<!--     bind_rows(tibble(Sample.ID = 1:length(accum.i), R.name = r.name,  -->
+<!--                      accum.obs = accum.i)) -->
+<!-- } -->
 
-vars = c("INLA"="red", "PAIPR"="blue")
-ggplot(pp.samples) + 
-  geom_density(aes(x=accum.rvs, color='INLA', fill='INLA'), alpha=0.1) + 
-  geom_density(aes(x=accum.obs, color='PAIPR', fill='PAIPR'), alpha=0.1) + 
-  scale_colour_manual(name="Data sources:", values=vars) + 
-  scale_fill_manual(name="Data sources:", values=vars) + 
-  xlab("Accumulation") + 
-  facet_wrap(~R.name)
-```
+<!-- pp.samples = pp.samples %>% left_join(accum.obs, by = c("R.name", "Sample.ID")) %>%  -->
+<!--   mutate(R.name = as.factor(R.name)) -->
 
-And these return summary statistics for the ppc distributions for all the test data.
-```{r}
-# Generate summaries of posterior predictive checks for test data
-system.time(
-  post.pred_test <- pp.dist(data=test.fitted, prec=mod.test$summary.hyperpar$mean[1], 
-                       prec.sd=mod.test$summary.hyperpar$sd[1])
-)
-```
+<!-- # ggplot(pp.samples) +  -->
+<!-- #   geom_density(aes(x=accum.rvs, color=ROW, fill=ROW), alpha=0.1) +  -->
+<!-- #   xlab('Posterior predictive accumulation') -->
 
-Below are some plots visually summarizing the performance of the test data
-```{r}
-res.test = dat.test %>% 
-  mutate(mu = test.fitted$mu, 
-         mu.pp=post.pred_test$mu, 
-         map.pp=post.pred_test$map, 
-         CI.low=post.pred_test$CI.low, 
-         CI.hi=post.pred_test$CI.high) %>% 
-  mutate(y.res = mu-accum, pp.res=map.pp-accum)
+<!-- vars = c("INLA"="red", "PAIPR"="blue") -->
+<!-- ggplot(pp.samples) +  -->
+<!--   geom_density(aes(x=accum.rvs, color='INLA', fill='INLA'), alpha=0.1) +  -->
+<!--   geom_density(aes(x=accum.obs, color='PAIPR', fill='PAIPR'), alpha=0.1) +  -->
+<!--   scale_colour_manual(name="Data sources:", values=vars) +  -->
+<!--   scale_fill_manual(name="Data sources:", values=vars) +  -->
+<!--   xlab("Accumulation") +  -->
+<!--   facet_wrap(~R.name) -->
+<!-- ``` -->
+
+<!-- And these return summary statistics for the ppc distributions for all the test data. -->
+<!-- ```{r} -->
+<!-- # Generate summaries of posterior predictive checks for test data -->
+<!-- system.time( -->
+<!--   post.pred_test <- pp.dist(data=test.fitted, prec=mod.test$summary.hyperpar$mean[1],  -->
+<!--                        prec.sd=mod.test$summary.hyperpar$sd[1]) -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- Below are some plots visually summarizing the performance of the test data -->
+<!-- ```{r} -->
+<!-- res.test = dat.test %>%  -->
+<!--   mutate(mu = test.fitted$mu,  -->
+<!--          mu.pp=post.pred_test$mu,  -->
+<!--          map.pp=post.pred_test$map,  -->
+<!--          CI.low=post.pred_test$CI.low,  -->
+<!--          CI.hi=post.pred_test$CI.high) %>%  -->
+<!--   mutate(y.res = mu-accum, pp.res=map.pp-accum) -->
 
 
-ggplot(data=res.test, aes(accum, map.pp)) + 
-  geom_point() + 
-  geom_abline(slope=1, intercept=0, color='red') + 
-  # geom_smooth(method = 'lm') + 
-  # lims(x=c(200,600), y=c(200,600)) + 
-  xlab("Accum (obs)") + ylab("Accum (PP MAP)")
+<!-- ggplot(data=res.test, aes(accum, map.pp)) +  -->
+<!--   geom_point() +  -->
+<!--   geom_abline(slope=1, intercept=0, color='red') +  -->
+<!--   # geom_smooth(method = 'lm') +  -->
+<!--   # lims(x=c(200,600), y=c(200,600)) +  -->
+<!--   xlab("Accum (obs)") + ylab("Accum (PP MAP)") -->
 
-ggplot(res.test, aes(mu, map.pp)) + geom_point() + 
-  geom_abline(slope=1, intercept=0, color='red') + 
-  # lims(x=c(200,600), y=c(200,600)) + 
-  xlab("Accum (expected)") + ylab("Accum (post. predictive MAP)")
+<!-- ggplot(res.test, aes(mu, map.pp)) + geom_point() +  -->
+<!--   geom_abline(slope=1, intercept=0, color='red') +  -->
+<!--   # lims(x=c(200,600), y=c(200,600)) +  -->
+<!--   xlab("Accum (expected)") + ylab("Accum (post. predictive MAP)") -->
 
-d.map = density(res.test$pp.res)
-map.mode = d.map$x[which.max(d.map$y)]
-d.mu = density(res.test$y.res)
-mu.mode = d.mu$x[which.max(d.mu$y)]
-ggplot(res.test) + geom_density(aes(pp.res)) + 
-  geom_vline(xintercept = map.mode, linetype=2, color='red') + 
-  annotate(geom="text", x=map.mode-67, y=max(d.map$y), 
-           label=paste("MAP =", format(map.mode, digits=3)), 
-           color="red") + 
-  geom_vline(xintercept = mu.mode, linetype=2, color='blue') + 
-  annotate(geom="text", x=mu.mode+33, y=max(d.map$y), 
-           label=paste("Mu =", format(mu.mode, digits=3)), 
-           color="blue") + 
-  xlab("Mean post. pred. accum residuals") + ylab('density')
-```
+<!-- d.map = density(res.test$pp.res) -->
+<!-- map.mode = d.map$x[which.max(d.map$y)] -->
+<!-- d.mu = density(res.test$y.res) -->
+<!-- mu.mode = d.mu$x[which.max(d.mu$y)] -->
+<!-- ggplot(res.test) + geom_density(aes(pp.res)) +  -->
+<!--   geom_vline(xintercept = map.mode, linetype=2, color='red') +  -->
+<!--   annotate(geom="text", x=map.mode-67, y=max(d.map$y),  -->
+<!--            label=paste("MAP =", format(map.mode, digits=3)),  -->
+<!--            color="red") +  -->
+<!--   geom_vline(xintercept = mu.mode, linetype=2, color='blue') +  -->
+<!--   annotate(geom="text", x=mu.mode+33, y=max(d.map$y),  -->
+<!--            label=paste("Mu =", format(mu.mode, digits=3)),  -->
+<!--            color="blue") +  -->
+<!--   xlab("Mean post. pred. accum residuals") + ylab('density') -->
+<!-- ``` -->
 
 ## Random effects
 
 Here are plots showing the spatial random field effect and the error on the estimates.
 ```{r}
 spat.tbl = tibble(E = mesh$loc[,1], N = mesh$loc[,2], 
-                  spat.mu = mod.test$summary.random$spat.field$mean, 
-                   spat.sd = mod.test$summary.random$spat.field$sd) %>% 
+                  spat.mu = mod.test$summary.random$spat.idx$mode, 
+                   spat.sd = mod.test$summary.random$spat.idx$sd) %>% 
   st_as_sf(coords=c("E", "N"), crs=st_crs(dat.train))
 
 ggplot(spat.tbl) + geom_sf(aes(color=spat.mu)) + 
@@ -698,7 +704,7 @@ ggplot(spat.tbl) + geom_sf(aes(color=spat.sd)) +
 Below is a plot of the temporal random effect and its estimated uncertainty.
 ```{r}
 time.tbl = tibble(Year=yr.min+(1:nrow(mod.test$summary.random$time)), 
-                  time.mu = mod.test$summary.random$time$mean, 
+                  time.mu = mod.test$summary.random$time$mode, 
                    time.sd = mod.test$summary.random$time$sd)
 
 ggplot(time.tbl, aes(x=Year, y=time.mu)) + 
@@ -739,7 +745,7 @@ grid.pts = tibble(x = projgrid$lattice$loc[,1],
 grid.sf = st_as_sf(grid.pts, coords=c('x','y'))
 st_crs(grid.sf) = st_crs(gdf_traces)
 
-
+# Add time coordinates to prediction grid
 
 
 
