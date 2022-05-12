@@ -1,0 +1,409 @@
+---
+title: "WAIS Accum Modeling in INLA"
+output: 
+  html_notebook:
+    code_folding: hide
+---
+
+Here is the breakdown so far of what I am trying to do in INLA with modeling annual accumulation across central West Antarctica.
+The main parameter of interest for me is the spatial distribution in the change in accumulation over time (with the uncertainty in this trend across the region) while accounting for the temporal and spatial autocorrelation in the data.
+My main questions are (1) do I understand the model properly and is it doing/estimating what I think it is? (2) are there better ways that you know of to implement the model for my targets of interest? and (3) I'm seeing some weird behavior in some of the marginal posterior distributions that I would like your thoughts on.
+
+## Model setup
+
+*Here's a overview of the statistical underpinnings of the model as I see them.*
+*Feel free to critique/correct any misconceptions or errors you see here (and any issues with equations/notations, as I am new to this and have also been revising/updating it a fair bit).*
+*Many thanks!*
+
+The accumulation data represent a continuous distribution of a random variable over two continuous spatial dimensions and indexed over an additional discrete temporal dimension.
+I model accumulation as a gamma distribution to ensure a zero-bounded function with increased variance at higher expected values.
+$$\mathbf{Y} \sim Gamma(a,b)$$
+Rather than using the shape and rate parameters $a$ and $b$, I express this gamma distribution in terms of the expected y value $E(y_i) = a_i/b_i = \mu_i$ and its associated variance (as expressed in INLA using the precision parameter $\phi$) $Var(y_i) = a_i/b_i^2 = \mu_i^2/\phi$.
+This $\phi$ is the same precision parameter as output from `inla` (there is also a scale parameter $s$ that has a default of 1 where $Var(y_i) = 1/\tau$ and $\tau = (s\phi)/\mu_i^2$).
+With rearranging and substituting, I have $a_i = \phi$ and $b_i = \phi/\mu_i$ and I can therefore express the distribution in accumulation observations in terms of $\phi$ and $\mu_i$.
+$$y_i \sim Gamma(\mu_i, \phi)$$
+
+For each observation $y_{i,t} \in \mathbf{Y}$, I construct a linear predictor $\eta_{i,t}$ for the expectation value $\mu_{i,t}$.
+As I assume a gamma-distribution for accumulation, I associate $\eta_{i,t}$ and $\mu_{i,t}$ via the log link function.
+$$\log(\mu_{i,t}) = \eta_{i,t}$$ 
+I can further model $\eta_{i,t}$ as a generalized linear model consisting of fixed effect variables $\mathbf{X}$ and smoothed random latent effects (in this case modeling a spatial random effect $u(\cdot)$ and a temporal random effect $\omega(\cdot)$).
+$$
+\eta_{i,t} = \alpha + \sum^M_{m=1} \beta_m x_{mi} + u(s_i) + \omega(t)
+$$
+
+These latent random effects $u_i$ and $\omega_i$ are indexed by a set of parameters $\theta_s$ and $\theta_t$ that account for the spatial and temporal correlation in the data.
+I can model these correlation structures (as defined by the parameters $\pmb{\theta}$) as latent stationary Gaussian fields, using a function of some hyperparameters $\pmb{\psi}$ and an associated prior distribution $p(\pmb{\psi})$.
+This is equivalent to assuming that $\pmb{\theta}$ is associated with some multivariate Normal distribution with mean $\mu = (\mu_1,...,\mu_n)'$ and covariance structure $\Sigma$, where $\Sigma_{jk} = Cov(\theta_j, \theta_k)$.
+
+$$
+\pmb{\theta} \sim \mathcal{N}(\mu_\theta, \Sigma_\theta)
+$$
+
+If I assume adherence to Markovian properties, the precision matrix $Q = \Sigma^{-1}$ is sparse, with the non-zero components of $Q$ completely given by the neighborhood structure ($N$) of the process, i.e. $Q_{jk} \neq 0 \iff k \in \{j,N(j)\}$.
+In this assumption, I specify a Gaussian-Markov Random Field for both the spatial and temporal structures, permitting vast improvements in computational efficiency.
+I also model the spatial and temporal random effects independently, which again greatly improves computation time, but will fail to capture any co-dependencies between these effects.
+
+I model the temporal random effect $\omega$ as a first-order autoregressive model^[I will eventually want to update this to an AR(2) process due to the known temporal autocorrelation in the data] (representing how the spatial field evolves in time) where
+$$\omega_t = \rho \omega_{t-1}$$
+
+
+
+The objective, therefore, is to find the joint posterior distribution of the various parameters of interest, as this will allow me to perform inference and make predictions at unobserved locations.
+$$P(\phi, \alpha, \pmb{\beta}, \rho, R_s, \sigma_s \mid \mathbf{Y})$$
+
+### Direct temporal trend analysis
+
+*This is where I've (maybe?) diverged a bit from what I discussed above.*
+
+As I am most interested in estimating the spatially-varying trend in accumulation over time, I've attempted to adapt/implement a model to explicitly do this.
+This rendition of the model follows the areal example for disease mapping found in Section 3.3 of [A tutorial in spatial and spatio-temporal models with R-INLA](https://discovery.ucl.ac.uk/id/eprint/1415919/1/Baio_BlaCamBaiRue.pdf), along with some inspiration from an [INLA discussion group thread](https://groups.google.com/g/r-inla-discussion-group/c/X_g4NuqqHfY).
+The [section on dynamic space-time regression](https://becarioprecario.bitbucket.io/spde-gitbook/ch-stapp.html#dynamic-space-time-regression) in "Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA" also discusses how to implement spatially-varying model coefficients in INLA, but near as I can tell it doesn't explicitly discuss extracting the time coefficient (but maybe I missed it, or it is trivial to add this?).
+
+The idea here (i.e. in following the disease mapping example) is to directly model the temporal trend as a global fixed effect, but then model the deviations from the global value as a spatially-correlated random effect.
+I want to do this while also accounting for both spatial and temporal correlations in the expected values of accumulation.
+The linear predictor therefore now looks like:
+$$
+\eta_{i,t} = \alpha + \sum^M_{m=1} \beta_m x_{mi} + (\beta_G + \delta_i) \times time \ + u(s_i) + \omega(t)
+$$
+
+This model therefore accounts for fixed effects, a global fixed effect from time $\beta_G$, a spatially-varying deviation (modeled as a spatial random effect indexed on time) from the global time effect $\delta_i$, a spatial random effect, and a temporal random effect.
+
+*When looking at the model implementation below, is the above model what I am actually doing?*
+
+## Model encoding
+
+### Imports
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(here)
+library(tidyverse)
+library(sf)
+library(cetcolor)
+# library(terra)
+library(INLA)
+library(spdep)
+```
+
+### Data loading
+```{r}
+data = readRDS(here('data/Rdata-clean.rds'))
+gdf_traces = readRDS(here('data/Rdata-gdf_trace.rds'))
+```
+
+While I am testing/developing things, I'm only using a small subset of the data (around 1/2 a percent).
+These are spatially distributed across the full region but further limited to the time period 1979--2010.
+This still gives a few thousand observations to work with though.
+Also for initial testing of everything, I am only including select time-invariant covariates.
+Once I have a fully fleshed-out workflow though, I intend to add a few more, including some time-varying climate estimates (e.g. wind vectors).
+I center the covariates about the mean and scale them with the standard deviation, and also normalize the discrete time dimension, setting the min year as Year 1.
+I also perform a training/validation split for later use.
+
+```{r}
+set.seed(777)
+gdf_traces = gdf_traces %>% sample_frac(0.01)
+data = data %>% filter(trace_ID %in% gdf_traces$trace_ID) %>% 
+  filter(Year >= 1979) %>% filter(Year < 2010) %>% arrange(trace_ID, Year)
+
+# Select variables of interest
+dat = data %>% select(trace_ID, East, North, Year, accum, 
+                      std, elev, dem, slope, aspect, u10m, v10m, 
+                      mu.u10, mu.v10)
+
+# Center covariates
+yr.min = min(dat$Year)-1
+dat = dat %>% 
+  mutate(Year = Year-yr.min, elev = elev-mean(elev, na.rm=TRUE), 
+         dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE), 
+         u10m=u10m-mean(u10m, na.rm=TRUE), v10m=v10m-mean(v10m, na.rm=TRUE), 
+         mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE))
+         # u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
+
+# Scale covariates by sd
+dat = dat %>% 
+  mutate(Year = Year, elev = elev/sd(elev), dem=dem/sd(dem), 
+         slope=slope/sd(slope), u10m=u10m/sd(u10m), v10m=v10m/sd(v10m), 
+         mu.u10=sd(mu.u10), mu.v10=sd(mu.v10))
+
+# Split into training and testing sets
+dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
+dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
+dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
+```
+
+### INLA  modeling
+
+I create the mesh used for defining the neighborhoods (this is important for generating the sparse precision matrix $Q$, enabling the GMRF approximation).
+I also create spatial projector matrices for the spatial random effect `A.spat` and the spatial effect on the deviation from the global time trend `A.spYR`.
+I assign priors here using PC matern covariance.
+*I may also need to revisit the priors specification, as I'm not sure I have the right assumption of units/transformations for all of them.*
+
+*These next sections are where I'm not sure I am telling INLA to do what I think I am.*
+```{r}
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
+                    max.edge = c(25000, 75000), cutoff = 5000)
+plot(mesh)
+points(dat.train %>% select(East, North), col = "red")
+
+spde = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(15000, 0.01), # P(range < 15 km) = 0.01
+  prior.sigma = c(10, 0.05))
+
+spde.yr = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(5000, 0.01), # P(range < 5 km) = 0.01
+  prior.sigma = c(1, 0.01), 
+  constr = TRUE) #Adds an integrate-to-zero constraint (this seemed appropriate as this will model deviations from the global mean effect for time)
+
+# Index for SPDE model and projector matrix
+spat.idx = inla.spde.make.index(name = "spat.idx", n.spde = spde$n.spde)
+A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
+
+# Index for SPDE model and projector matrix
+spYR.idx = inla.spde.make.index(name = "spYR.idx", n.spde = spde.yr$n.spde)
+A.spYR = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
+```
+
+```{r}
+# Make data stack
+dat.stack <- inla.stack(
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, 1, A.spat, A.spYR),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        slope=dat.train$slope, aspect=dat.train$aspect, 
+                        u10m=dat.train$u10m, v10m=dat.train$v10m, 
+                        mu.u10=dat.train$mu.u10, mu.v10=dat.train$mu.v10, 
+                        Year=dat.train$Year), 
+                 list(time = dat.train$Year), 
+                 spat.idx, 
+                 spYR.idx),
+  tag = 'dat')
+
+# Priors for temporal autocorrelation, fixed effects (currently empty), and gamma precision
+time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
+prior.fixed = list()
+prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+
+# Model formula
+form = y ~ -1 + Intercept + #modeling the intercept
+  dem + aspect + #fixed effects
+  f(spat.idx, model = spde) + #spatial random effect
+  Year + f(spYR.idx, Year, model = spde.yr) + #Global effect from year and deviation from global (modeled as a spatial random effect with with weights given by Year)
+  f(time, model = 'ar1', hyper = time.spec) #Temporal random effect modeled as AR1
+```
+*The above model formula is a main place I'm not sure I am specifying what I think I am for INLA. Is this doing what I think I'm doing i.e. the formula shown in "Direct temporal trend analysis?"*
+
+## Run the model
+
+```{r}
+mod = inla(form, 
+               data = inla.stack.data(dat.stack), 
+               family = 'Gamma',
+               quantiles = NULL, 
+               control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1), 
+               # control.fixed = prior.fixed, 
+               control.family = list(hyper = list(prec = prec.prior)), 
+               control.compute = list(waic=TRUE, return.marginals.predictor=TRUE, config=TRUE))
+
+```
+
+## Evalulate model performance
+
+```{r}
+summary(mod)
+```
+
+Compare results to a standard log-link gamma GLM to ensure correct interpretation of the fixed effects.
+```{r}
+# Formula without random variables
+f.glm = y ~ -1 + Intercept + Year + dem + aspect
+
+# Fitting a frequentist GLM to data
+mod.glm = glm(f.glm, data = dat.train %>% rename(y=accum) %>% mutate(Intercept=1), 
+               family = Gamma(link = "log"))
+
+summary(mod.glm)
+```
+
+### Posterior plots
+
+Below is just a helper function for extracting and transforming marginal distributions to more intuitive scales.
+I've then included some plots of the transformed marginal posteriors.
+The hyperparameters for precisions and the sd's of spatial indices are left untransformed in these plots.
+```{r}
+
+t.marg = function(mod.marg, t.func, param.names=NULL, n=100) {
+  
+  if (any(class(mod.marg) == "matrix")) {
+    mod.marg = list(mod.marg)
+    if (!is.null(param.names)) {
+      names(mod.marg = param.names)
+    } else {
+      names(mod.marg) = "UNNAMED"
+    }
+  }
+  
+  if (is.null(param.names)) {
+    param.names = names(mod.marg)
+  }
+  
+    if (is.list(t.func) != TRUE) {
+    t.func = list(t.func)
+  }
+  if (length(t.func) == 1) {
+    t.func = rep(t.func, length(param.names))
+  }
+  
+  # Preallocate output tbl
+  out = tibble(x=numeric(), y=numeric(), Param=vector(mode="character"))
+  
+  marg.names = names(mod.marg)
+  
+  for (i in 1:length(marg.names)) {
+    marg.i = inla.tmarginal(t.func[[i]], mod.marg[[marg.names[i]]], n=n)
+    out = out %>% bind_rows(tibble(x=marg.i[,1], y=marg.i[,2], Param=param.names[i]))
+  }
+  return(out)
+}
+```
+
+```{r}
+marg.fixed = t.marg(mod$marginals.fixed, function(x) exp(x))
+HP.names = c("Gamma precision", "Range for spat.idx", "Stdev for spat.idx", 
+             "Range for spYR.idx", "Stdev for spYR.idx", "Time precision", "Rho for time")
+marg.hyper = t.marg(mod$marginals.hyperpar, function(x) (x), param.names = HP.names)
+p.selection = c("Intercept", "Year", "dem", "aspect", "Gamma precision", "Range for spat.idx", 
+                "Stdev for spat.idx", "Time precision", "Rho for time", "Stdev for spYR.idx", 
+                "Range for spYR.idx")
+tmp = marg.fixed %>% bind_rows(marg.hyper) %>% filter(Param %in% p.selection)
+```
+
+```{r fig, fig.width=16}
+ggplot(tmp, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param), scales = "free") + 
+  theme(text = element_text(size = 20))  
+```
+
+If I understand correctly (and used the right transformations for the links), the following posteriors should show:
+
+- Intercept: the mean accumulation when all other effects are at their mean values (this will be in the original units of mm w.e. per year) *this value of ~430 mm/a seems reasonable*
+- Gamma precision: the expected residual variability in accumulation from random noise not accounted for in the expected value $\mu_{i,t}$ *(for the average accumulation, this would be a sd of ~86 mm/a, which seems reasonable)*
+- fixed effect coefficients: should be multiplicative e.g. a one $\sigma$ increase in elevation (`dem` in the model) results in ~14% reduction in accumulation ($0.86-1= -0.14$) *these values also seem fairly reasonable*
+- range: the area-of-effect for spatial correlation (in meters) *again seems reasonable (~80 km) for spatial correlation in accumulation*
+- rho: the temporal autocorrelation *we assume this to be pretty high, so ~0.9 again makes sense*
+- `stdev for spat.idx`: the standard deviation in accumulation values (in original mm/a?) due to spatial autocorrelation i.e. how much variability we expect due to spatial correlation? *if that's true, this seems rather small at ~0.15 mm/a, especially given the value for precision.*
+  - *After additional consideration, I think this might be on an untransformed log scale, in which case this represents a $\pm16$% impact on the expected accumulation, which seems reasonable to me. Any clarification/confirmation you can offer would be wonderful though.*
+- `stdev for spYR.idx`: the standard deviation in the magnitude of deviation from the global accumulation trend with time i.e. how much variability we expect in the `Year` fixed coefficient due to spatial correlation. *I don't really have any idea about the units here though, is this perhaps a % change as well? If that's true, then the temporal trends STRONGLY vary based on location, given the narrow range in the global coefficient for Year of ~0.5% loss per year and that a decent amount of probability in the deviations shows 25+%. Could use some insight on this for sure.*
+  - *Or might this be a % change to the trend value itself? In which case it would represent say a 25% increase/decrease relative to the -0.5% baseline?*
+
+For the most part, these posteriors seem reasonable and fit with what I would broadly expect.
+I'm having some trouble interpreting/assessing a couple of them though (as noted above), and would greatly appreciate your thoughts/feedback on it.
+
+I'm also noticing some other weird things that I would like your thoughts on.
+Regarding the deviations from the global time trend, I did a bit more digging and found that the mean values across the region for these deviations are minuscule (shown in the plot below), on the order of $10^{-17}$, while the sd's in these values are much much higher ($10^{-1}$).
+The deviations also do not sum to zero (as I think they should as I give this constraint when defining the SPDE model in Line 154), but maybe this is just an artifact of the values being so close to zero anyways?
+```{r}
+Bi.sp = tibble(East = mesh$loc[,1], North = mesh$loc[,2], 
+               delta.i = mod$summary.random$spYR.idx$mean, 
+               delta.sd = mod$summary.random$spYR.idx$sd) %>% 
+  mutate(B.G = delta.i+mod$summary.fixed["Year",]$mean)
+# ggplot(Bi.sp) + geom_density(aes(x=B.G))
+ggplot(Bi.sp) + geom_density(aes(x=delta.i))
+
+ggplot(Bi.sp) + geom_density(aes(x=delta.sd))
+```
+
+This is further highlighted by the below plot of a representative marginal distribution in $\beta_G + d_i$ for a single location (after applying an inverse link transformation, so this now shows the % change in accumulation per year due to time for this location).
+```{r}
+B.ex = t.marg(mod$summary.fixed$mean[4]+mod$marginals.random$spYR.idx$index.7, 
+              function(x) exp(x)) %>% 
+  mutate(x = x-1)
+ggplot(B.ex) + geom_line(aes(x=x,y=y))
+```
+
+So the modal deviation is negligible relative to the global time trend (-0.5%), but the error on this effect is massive with very fat tails, resulting in a plausible effect anywhere from a ~50% loss to a 100% gain in accumulation per year for this particular location.
+All the other locations have similarly massive uncertainties.
+This seems like far too wide a range to be useful.
+I'm now trying to figure out if this results from a mis-specfication of the model, or if INLA itself is just struggling with these data and this particular parameter for whatever reason.
+
+## Additional plots and comparisons (in case you find them helpful)
+
+Plots of the fitted mean values and the gamma precision uncertainites (both in original units) for Years 1, 11, 21, and 31 (1979, 1989, 1999, 2009).
+```{r}
+fitted.idx = inla.stack.index(dat.stack, 'dat')$data
+
+val.fitted = tibble(mu = mod$summary.fitted.values$mean[fitted.idx]) %>% 
+  mutate(sd = sqrt(mu^2/mod$summary.hyperpar$mean[1])) %>% 
+  bind_cols(dat.train %>% select(Year, East, North)) %>% 
+  st_as_sf(coords=c("East", "North"), crs=st_crs(gdf_traces))
+
+ggplot(val.fitted %>% filter(Year %in% c(1,11,21,31))) + 
+  geom_sf(aes(color=mu)) + scale_color_viridis_c() + facet_wrap(~ Year)
+
+ggplot(val.fitted %>% filter(Year %in% c(1,11,21,31))) + 
+  geom_sf(aes(color=sd)) + scale_color_viridis_c(option="plasma") + facet_wrap(~ Year)
+```
+
+Plots of the mean spatial random effect for accumulation and for the temporal trend in accumulation.
+I am using the assumption that these values are on the log scale, and am therefore representing them transformed to a % increase/decrease in the expected accumulation.
+```{r}
+test.rand = tibble(trend.delta = exp(mod$summary.random$spYR.idx$mean) - 1, 
+                   spat.mu = exp(mod$summary.random$spat.idx$mean) - 1, 
+                   East = mesh$loc[,1], North = mesh$loc[,2]) %>% 
+  st_as_sf(coords=c("East", "North"), crs=st_crs(gdf_traces))
+ggplot(test.rand) + geom_sf(aes(color=spat.mu)) + 
+  scale_color_gradientn(colours = cet_pal(5, name = "d1"))
+ggplot(test.rand) + geom_sf(aes(color=trend.delta)) + 
+  scale_color_continuous()
+```
+
+Plots of representative marginal distributions for the spatial random effect of individual select locations.
+The selected locations represent the min/mid/max effects across the region.
+These are again transformed to represent the % change in expected accumulation value due to the spatial random effect.
+```{r}
+marg.spat = t.marg(mod$marginals.random$spat.idx$index.205, function(x) exp(x)) %>% 
+  mutate(Param = "idx.205")
+marg.spat = marg.spat %>% bind_rows(t.marg(mod$marginals.random$spat.idx$index.1147, function(x) exp(x)) 
+                                    %>% mutate(Param = "idx.1147")) %>% 
+  bind_rows(t.marg(mod$marginals.random$spat.idx$index.214, function(x) exp(x)) 
+            %>% mutate(Param = "idx.214"))
+marg.spat = marg.spat %>% mutate(x = x-1)
+
+ggplot(marg.spat, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param))  
+```
+
+And similar plots for selected years of the temporal random effect (1979, 1989, 1999, 2009).
+```{r}
+marg.time = t.marg(mod$marginals.random$time$index.1, function(x) exp(x)) %>% mutate(Param = "1979")
+marg.time = marg.time %>% bind_rows(t.marg(mod$marginals.random$time$index.11, function(x) exp(x)) 
+                                    %>% mutate(Param = "1989")) %>% 
+  bind_rows(t.marg(mod$marginals.random$time$index.21, function(x) exp(x)) 
+            %>% mutate(Param = "1999")) %>% 
+  bind_rows(t.marg(mod$marginals.random$time$index.31, function(x) exp(x)) 
+            %>% mutate(Param = "2009"))
+marg.time = marg.time %>% mutate(x=x-1)
+
+ggplot(marg.time, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param))  
+```
+
+Below is a plot of the temporal random effect and its estimated uncertainty ($\pm \sigma$) across the full time series.
+```{r}
+time.tbl = tibble(Year=yr.min+(1:nrow(mod$summary.random$time)), 
+                  time.mu = mod$summary.random$time$mean, 
+                   time.sd = mod$summary.random$time$sd)
+
+ggplot(time.tbl, aes(x=Year, y=time.mu)) + 
+  geom_line() + 
+  geom_ribbon(aes(ymin=time.mu-time.sd,ymax=time.mu+time.sd), alpha=0.3) + 
+  ylab("Magnitude of temporal random effect")
+```
+
+## Summary of questions
+
+The following is just a list of the main questions I still have and would appreciate any info/feedback you might have on them.
+
+1. Does the model I have devised seem reasonable, or are there (easy/quick) ways to better get out the information of interest?
+2. Does the model as specified (particularly in regards to the spatial variation in time trends) actually calculate/return what I think it does?
+3. Are my interpretations of model output/transformations correct?
+4. Thoughts/suggestions regarding the very small mean values and comparatively very large uncertainties of $\delta_i$ (the spatial deviations in time trend coefficients) seen in the data?
