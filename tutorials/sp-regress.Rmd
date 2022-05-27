@@ -1,0 +1,305 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is a reproduction of the example in the [section on dynamic space-time regression](https://becarioprecario.bitbucket.io/spde-gitbook/ch-stapp.html#dynamic-space-time-regression) in "Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA".
+I do this as an understanding check prior to adapting and applying it to my data.
+
+```{r}
+library(INLA)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(ggplot2)
+library(spdep)
+```
+
+
+Define custom function (found in `spde-book-files/R/spde-book-functions.R`) for generated spatially correlated data.
+```{r}
+book.rMatern <- function(n, coords, sigma=1, range, kappa = sqrt(8*nu)/range, variance = sigma^2, nu=1) {
+    m <- as.matrix(dist(coords))
+    m <- exp((1-nu)*log(2) + nu*log(kappa*m)-
+             lgamma(nu))*besselK(m*kappa, nu)
+    diag(m) <- 1
+    return(drop(crossprod(chol(variance*m),
+                          matrix(rnorm(nrow(coords)*n), ncol=n))))
+}
+```
+
+Generate random spatial locations
+```{r}
+n <- 150
+set.seed(1)
+coo <- matrix(runif(2 * n), n)
+```
+
+Generate spatially and temporally correlated data
+```{r}
+kappa <- c(10, 12)
+sigma2 <- c(1 / 2, 1 / 4)
+k <- 15
+rho <- c(0.7, 0.5) 
+
+set.seed(2)
+beta0 <- book.rMatern(k, coo, range = sqrt(8) / kappa[1],
+  sigma = sqrt(sigma2[1]))
+
+set.seed(3)
+beta1 <- book.rMatern(k, coo, range = sqrt(8) / kappa[2],
+  sigma = sqrt(sigma2[2]))
+beta0[, 1] <- beta0[, 1] / (1 - rho[1]^2)
+beta1[, 1] <- beta1[, 1] / (1 - rho[2]^2)
+
+for (j in 2:k) {
+  beta0[, j] <- beta0[, j - 1] * rho[1] + beta0[, j] *
+    (1 - rho[1]^2)
+  beta1[, j] <- beta1[, j - 1] * rho[2] + beta1[, j] *
+    (1 - rho[2]^2)
+}
+
+
+set.seed(4)
+# Simulate the covariate values
+hh <- runif(n * k) 
+mu.beta <- c(-5, 1)
+taue <- 20 
+
+set.seed(5)
+# Error in the observation
+error <- rnorm(n * k, 0, sqrt(1 / taue))
+
+# Dynamic regression part
+y <- (mu.beta[1] + beta0) + (mu.beta[2] + beta1) * hh + 
+  error
+
+# DGK Model year as covariate
+year.val = matrix(data=(1:k)/k, nrow=n, ncol=k, byrow=TRUE)
+# y = (mu.beta[1] + beta0) + (mu.beta[2] + beta1) * year.val + 
+#   error
+
+# Arrange in tbl
+dat = tibble(loc.idx=rep(1:n,k), E=rep(coo[,1],k), N=rep(coo[,2],k), Year=rep(1:k, each=n), y=c(y), hh=hh, yr.val = c(year.val))
+```
+
+Exploration of the data.
+```{r}
+h.trends = dat %>% 
+  group_by(loc.idx) %>% 
+  do(tidy(lm(y ~ hh, data = .))) %>% 
+  filter(term=='hh') %>% select(-term)
+dat.mu = dat %>% group_by(loc.idx) %>% 
+  summarize(E=mean(E), N=mean(N), y=mean(y)) %>% 
+  left_join(h.trends %>% select(loc.idx, estimate))
+
+ggplot(dat.mu) + geom_point(aes(x=E, y=N, color=y)) + scale_color_viridis_c()
+ggplot(dat.mu) + geom_point(aes(x=E, y=N, color=estimate)) + scale_color_gradient2()
+ggplot(dat %>% group_by(loc.idx)) + geom_line(aes(x=Year, y=y, group=loc.idx), alpha=0.1)
+```
+
+
+```{r}
+mesh <- inla.mesh.2d(dat %>% select(E,N), max.edge = c(0.15, 0.3),
+  offset = c(0.05, 0.3), cutoff = 0.07)
+
+plot(mesh)
+points(dat %>% select(E, N), col = "red")
+
+spde <- inla.spde2.pcmatern(mesh = mesh,
+  prior.range = c(0.05, 0.01), # P(practic.range < 0.05) = 0.01
+  prior.sigma = c(1, 0.01)) # P(sigma > 1) = 0.01
+
+i0 <- inla.spde.make.index('i0', spde$n.spde, n.group = length(unique(dat$Year)))
+i1 <- inla.spde.make.index('i1', spde$n.spde, n.group = length(unique(dat$Year)))
+```
+
+```{r}
+A0 <- inla.spde.make.A(mesh, loc=cbind(dat$E, dat$N), group = dat$Year)
+A1 <- inla.spde.make.A(mesh, loc=cbind(dat$E, dat$N), 
+                       group = dat$Year, weights = dat$yr.val)
+
+dat.stack <- inla.stack(
+  data = list(y = dat$y), 
+  A = list(A0, A1, 1), 
+  effects = list(i0, 
+                 i1, 
+                 tibble(Intercept = 1, mu1 = 1, 
+                        yr.val=dat$yr.val, h = dat$hh)),
+  tag = 'dat')
+
+form <- y ~ 0 + mu1 + yr.val + # to fit mu_beta
+  f(i0, model = spde, group = i0.group, 
+    control.group = list(model = 'ar1')) + 
+  f(i1, model = spde, group = i1.group, 
+    control.group = list(model = 'ar1'))
+
+# Assigned initial starting values for parameter estimates
+theta.ini <- c(
+  log(taue), # likelihood log precision
+  log(sqrt(8) / kappa[1]), # log range 1
+  log(sqrt(sigma2[1])), # log stdev 1
+  log((1 + rho[1])/(1 - rho[1])), # log trans. rho 1
+  log(sqrt(8) / kappa[2]), # log range 1
+  log(sqrt(sigma2[2])), # log stdev 1
+  log((1 + rho[2]) / (1 - rho[2])))# log trans. rho 2
+```
+
+```{r model, cache=TRUE}
+mod = inla(form, family = 'gaussian',
+           data = inla.stack.data(dat.stack), 
+           control.predictor = list(A = inla.stack.A(dat.stack)), 
+           control.mode = list(theta = theta.ini, restart=TRUE), # initial theta value
+           control.inla = list(int.strategy = 'eb'))# no integr. wrt theta)
+```
+
+Extract model results of interest
+```{r}
+# Get indices of observed data
+fitted.idx = inla.stack.index(dat.stack, 'dat')$data
+
+dat = dat %>% mutate(y.mod=mod$summary.fitted.values$mean[fitted.idx], 
+                     i0.mu = mod$summary.random$i0$mean[fitted.idx], 
+                     i1.mu = mod$summary.random$i1$mean[fitted.idx])
+```
+
+## Adaptations
+
+I'm adapting the example to better align it with my particular data to see if I can still model and understand it.
+
+Generate random spatial locations
+```{r}
+n <- 150
+set.seed(1)
+coo <- matrix(runif(2 * n), n)
+```
+
+Generate spatially and temporally correlated data.
+The differences here with the original are (1) we are focused on the coefficient with respect to time (rather than `hh`) and (2) the time coefficient only varies spatially (with no need therefore of a temporal autocorrelation component for it). 
+```{r}
+kappa <- c(10, 12)
+sigma2 <- c(0.75, 1.1)
+k <- 15
+rho <- c(0.7, 0.5) 
+
+set.seed(2)
+beta0 <- book.rMatern(k, coo, range = sqrt(8) / kappa[1],
+  sigma = sigma2[1])
+
+set.seed(3)
+beta1 <- book.rMatern(1, coo, range = sqrt(8) / kappa[2],
+  sigma = sigma2[2])
+beta0[, 1] <- beta0[, 1] / (1 - rho[1]^2)
+# beta1[, 1] <- beta1[, 1] / (1 - rho[2]^2)
+
+for (j in 2:k) {
+  beta0[, j] <- beta0[, j - 1] * rho[1] + beta0[, j] *
+    (1 - rho[1]^2)
+  # beta1[, j] <- beta1[, j - 1] * rho[2] + beta1[, j] *
+  #   (1 - rho[2]^2)
+}
+
+# Remove temporal dependence of beta1 through averaging (each year has same value for beta1)
+# beta1 = as.vector(rowMeans(beta1))
+
+set.seed(4)
+# Simulate the covariate values
+hh <- runif(n * k) 
+mu.beta <- c(-5, 1)
+taue <- 20 
+
+set.seed(5)
+# Error in the observation
+error <- rnorm(n * k, 0, sqrt(1 / taue))
+
+# DGK Model year as covariate
+Year = matrix(data=(1:k), nrow=n, ncol=k, byrow=TRUE)
+y = (mu.beta[1] + beta0) + (mu.beta[2] + beta1) * Year +
+  error
+# year.val = matrix(data=(1:k)/k, nrow=n, ncol=k, byrow=TRUE)
+# y = (mu.beta[1] + beta0) + (mu.beta[2] + beta1) * year.val +
+#   error
+
+# Arrange in tbl
+dat = tibble(loc.idx=rep(1:n,k), E=rep(coo[,1],k), N=rep(coo[,2],k), 
+             Year=rep(1:k, each=n), y=c(y), yr.val = c(year.val))
+```
+
+Exploration of the data.
+```{r}
+yr.trends = dat %>% 
+  group_by(loc.idx) %>% 
+  do(tidy(lm(y ~ Year, data = .))) %>% 
+  filter(term=='Year') %>% select(-term)
+dat.mu = dat %>% group_by(loc.idx) %>% 
+  summarize(E=mean(E), N=mean(N), y=mean(y)) %>% 
+  left_join(yr.trends %>% select(loc.idx, estimate))
+
+ggplot(dat.mu) + geom_point(aes(x=E, y=N, color=y)) + scale_color_viridis_c()
+ggplot(dat.mu) + geom_point(aes(x=E, y=N, color=estimate))
+ggplot(dat %>% group_by(loc.idx)) + geom_line(aes(x=Year, y=y, group=loc.idx), alpha=0.1)
+```
+
+
+```{r}
+mesh <- inla.mesh.2d(dat %>% select(E,N), max.edge = c(0.15, 0.3),
+  offset = c(0.05, 0.3), cutoff = 0.07)
+
+plot(mesh)
+points(dat %>% select(E, N), col = "red")
+
+spde <- inla.spde2.pcmatern(mesh = mesh,
+  prior.range = c(0.05, 0.01), # P(practic.range < 0.05) = 0.01
+  prior.sigma = c(1, 0.01)) # P(sigma > 1) = 0.01
+
+i0 <- inla.spde.make.index('i0', spde$n.spde, n.group = length(unique(dat$Year)))
+i1 <- inla.spde.make.index('i1', spde$n.spde)
+
+A0 <- inla.spde.make.A(mesh, loc=cbind(dat$E, dat$N), group = dat$Year)
+A1 <- inla.spde.make.A(mesh, loc=cbind(dat$E, dat$N), weights = dat$Year)
+
+dat.stack <- inla.stack(
+  data = list(y = dat$y), 
+  A = list(A0, A1, 1), 
+  effects = list(i0, 
+                 i1, 
+                 tibble(Intercept = 1, mu1 = 1, 
+                        Year=dat$Year)),
+  tag = 'dat')
+
+form <- y ~ 0 + mu1 + Year + # to fit mu_beta
+  f(i0, model = spde, group = i0.group, 
+    control.group = list(model = 'ar1')) + 
+  f(i1, model = spde)
+```
+
+```{r}
+mod.2 = inla(form, family = 'gaussian',
+           data = inla.stack.data(dat.stack), 
+           control.predictor = list(A = inla.stack.A(dat.stack)), 
+           control.inla = list(int.strategy = 'eb'), # no integr. wrt theta)
+           control.compute = list(config=TRUE))
+```
+
+```{r}
+# i=sample.int(max(dat$loc.idx), size=1)
+# ggplot(dat %>% filter(loc.idx==i)) + geom_line(aes(x=Year, y=y))
+```
+
+Posterior checks on the linear coefficient (combined global and spatial components) for time.
+```{r}
+# Posterior draws for year coefficients
+draws=500
+n.locs = spde$n.spde
+tmp = inla.posterior.sample(draws, result = mod.2)
+tmp2 = inla.posterior.sample.eval(c("Year", "i1"), tmp)
+tmp.glob = unname(tmp2[1,])
+tmp.i = unname(tmp2[2:(n.locs+1),])
+tmp.tot = tmp.glob + tmp.i
+
+coeff.ppc = tibble(Sample=rep(1:draws, each=n.locs), coeff=as.vector(tmp.tot))
+
+ggplot(coeff.ppc %>% group_by(Sample)) + 
+  geom_line(aes(x=coeff, group=Sample), stat="density", alpha=0.1) + 
+  geom_density(data=dat.mu, aes(x=estimate), color='red') 
+```

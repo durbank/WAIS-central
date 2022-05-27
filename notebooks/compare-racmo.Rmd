@@ -93,9 +93,14 @@ ggplot(dat.gdf) + geom_density(aes(x=trend.res), fill='blue', alpha=0.5) +
   geom_vline(xintercept = 0)
 
 ggplot(dat.gdf) + 
-  geom_sf(aes(color=trend.res))  + 
+  geom_sf(aes(color=estimate.accum))  + 
   # scale_color_gradientn(colours = cet_pal(7, name = "d1"))
   scale_color_gradient2()
+
+ggplot(dat.gdf) + 
+  geom_sf(aes(color=trend.res))  + 
+  # scale_color_gradientn(colours = cet_pal(7, name = "d1"))
+  scale_color_gradient2(limits=c(-0.025, 0.005))
 ```
 
 

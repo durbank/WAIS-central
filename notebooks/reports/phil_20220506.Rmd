@@ -5,6 +5,18 @@ output:
     code_folding: hide
 ---
 
+## Notes
+
+- Try simulating data to test if we can recover values
+  - Ensure spatial variations in simulated data are smooth (sample from true GP?)
+  - Try with normal model first?
+- Prior on $\delta_i$?
+- Try fixing the range?
+- Exploratory analysis on the log scale
+- Ask questions on r-INLA discussion board?
+- Try with a larger data set?
+- Run model excluding time trend to account for other effects, and run additional model on residuals of first model.
+
 Here is the breakdown so far of what I am trying to do in INLA with modeling annual accumulation across central West Antarctica.
 The main parameter of interest for me is the spatial distribution in the change in accumulation over time (with the uncertainty in this trend across the region) while accounting for the temporal and spatial autocorrelation in the data.
 My main questions are (1) do I understand the model properly and is it doing/estimating what I think it is? (2) are there better ways that you know of to implement the model for my targets of interest? and (3) I'm seeing some weird behavior in some of the marginal posterior distributions that I would like your thoughts on.
@@ -115,7 +127,8 @@ dat = dat %>%
   mutate(Year = Year-yr.min, elev = elev-mean(elev, na.rm=TRUE), 
          dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE), 
          u10m=u10m-mean(u10m, na.rm=TRUE), v10m=v10m-mean(v10m, na.rm=TRUE), 
-         mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE))
+         mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE)) %>% 
+  mutate(Year = Year-mean(Year))
          # u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
 
 # Scale covariates by sd
@@ -172,8 +185,10 @@ dat.stack <- inla.stack(
                         slope=dat.train$slope, aspect=dat.train$aspect, 
                         u10m=dat.train$u10m, v10m=dat.train$v10m, 
                         mu.u10=dat.train$mu.u10, mu.v10=dat.train$mu.v10, 
-                        Year=dat.train$Year), 
-                 list(time = dat.train$Year), 
+                 #        Year=dat.train$Year-mean(dat.train$Year)), 
+                 # list(time = dat.train$Year-mean(dat.train$Year)), 
+                        Year=dat.train$Year),
+                 list(time = dat.train$Year),
                  spat.idx, 
                  spYR.idx),
   tag = 'dat')
@@ -191,6 +206,24 @@ form = y ~ -1 + Intercept + #modeling the intercept
   f(time, model = 'ar1', hyper = time.spec) #Temporal random effect modeled as AR1
 ```
 *The above model formula is a main place I'm not sure I am specifying what I think I am for INLA. Is this doing what I think I'm doing i.e. the formula shown in "Direct temporal trend analysis?"*
+
+```{r}
+# # Make data stack
+# dat.stack <- inla.stack(
+#   data = list(y = dat.train$accum), 
+#   A = list(1,1, A.spYR),
+#   effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+#                  tibble(Year=dat.train$Year),
+#                  spYR.idx),
+#   tag = 'dat')
+# 
+# # Priors for temporal autocorrelation, fixed effects (currently empty), and gamma precision
+# prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+# 
+# # Model formula
+# form = y ~ -1 + Intercept + #modeling the intercept
+#   Year + f(spYR.idx, Year, model = spde.yr) #Global effect from year and deviation from global (modeled as a spatial random effect with with weights given by Year)
+```
 
 ## Run the model
 
