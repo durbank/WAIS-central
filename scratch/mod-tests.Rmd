@@ -1,0 +1,454 @@
+---
+title: "Model comparisons between separable and kroenecker products"
+output: html_notebook
+---
+
+```{r}
+library(here)
+library(INLA)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(ggplot2)
+library(spdep)
+```
+### Data imports and preprocessing
+
+```{r}
+data = readRDS(here('data/Rdata-clean.rds'))
+gdf_traces = readRDS(here('data/Rdata-gdf_trace.rds'))
+
+# # Clip bounds
+# bbox = st_bbox(gdf_traces)
+# clipper = c((bbox[1]+0.3*(bbox[3]-bbox[1])), 
+#             (bbox[2]+0.5*(bbox[4]-bbox[2])), 
+#             (bbox[3]-0.2*(bbox[3]-bbox[1])), 
+#             bbox[4])
+# gdf_traces = st_crop(gdf_traces, clipper)
+
+
+skip.int = 25
+gdf.idx = seq(1, nrow(gdf_traces), by=skip.int)
+gdf_traces = gdf_traces[gdf.idx,]
+
+data = data %>% filter(trace_ID %in% gdf_traces$trace_ID) %>%
+  filter(Year >= 1975) %>% filter(Year < 2015) %>% arrange(trace_ID, Year)
+
+# Remove gdf rows where all data have been filtered out
+gdf_traces = gdf_traces %>% filter(trace_ID %in% data$trace_ID)
+
+# Select variables of interest
+dat = data %>% select(trace_ID, East, North, Year, accum, 
+                      std, SMB, elev, dem, slope, aspect, 
+                      # u10m, v10m, mu.u10, mu.v10
+                      )
+
+# Center covariates
+dat = dat %>% 
+  mutate(elev = elev-mean(elev, na.rm=TRUE), 
+         dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE), 
+         # u10m=u10m-mean(u10m, na.rm=TRUE), v10m=v10m-mean(v10m, na.rm=TRUE), 
+         # mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE)
+         ) %>% 
+  mutate(Year.mod = Year-mean(Year), Year.idx = (Year-min(Year)+1))
+         # u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
+
+# Scale covariates by sd
+dat = dat %>% 
+  mutate(elev = elev/sd(elev), dem=dem/sd(dem), 
+         slope=slope/sd(slope), 
+         # u10m=u10m/sd(u10m), v10m=v10m/sd(v10m), mu.u10=sd(mu.u10), mu.v10=sd(mu.v10)
+         )
+
+# Split into training and testing sets
+dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
+dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
+dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
+```
+
+Directly calculate linear coefficients of time from raw data.
+```{r}
+yr.trends = dat.train %>% 
+  group_by(trace_ID) %>% 
+  do(tidy(lm(accum ~ Year.mod, data = .))) %>% 
+  filter(term=='Year.mod') %>% select(-term)
+dat.mu = dat.train %>% group_by(trace_ID) %>% 
+  summarize(East=mean(East), North=mean(North), accum=mean(accum)) %>% 
+  left_join(yr.trends %>% select(trace_ID, estimate)) %>% 
+  mutate(log.est = log(1+(estimate/accum)))
+```
+
+### Model setup
+
+```{r}
+# More coarse mesh for development purposes
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
+                    max.edge = c(60000, 120000), cutoff = 10000)
+# mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
+#                     max.edge = c(30000, 90000), cutoff = 2000)
+plot(mesh)
+points(dat.train %>% select(East, North), col = "red")
+
+# These values will also need to be adjusted when going back to Gamma?
+spde = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(20000, 0.01), # P(range < 20 km) = 0.01
+  prior.sigma = c(10, 0.05))
+```
+
+## Separable formulation
+
+```{r}
+
+spat.idx = inla.spde.make.index('spat.idx', spde$n.spde)
+A.spat = inla.spde.make.A(mesh, 
+                          loc=cbind(dat.train$East, dat.train$North))
+
+yr.idx <- inla.spde.make.index('yr.idx', spde$n.spde)
+A.yr <- inla.spde.make.A(mesh, 
+                         loc=cbind(dat.train$East, dat.train$North), 
+                         weights = dat.train$Year.mod)
+
+# Make data stack
+stack.sep <- inla.stack(
+  data = list(y = dat.train$accum), 
+  # A = list(1, 1, 1, A.yr),
+  A = list(1, 1, 1, A.spat, A.yr),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        slope=dat.train$slope, aspect=dat.train$aspect, 
+                        Year=dat.train$Year.mod),
+                 list(time = dat.train$Year.mod),
+                 spat.idx, 
+                 yr.idx),
+  tag = 'dat')
+
+# Priors for temporal autocorrelation
+time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
+
+# Model formula
+f.sep = y ~ -1 + Intercept + 
+  dem + 
+  f(spat.idx, model = spde) + 
+  f(time, model = 'ar1', hyper = time.spec) +  #Temporal random effect modeled as AR1
+  f(yr.idx, model = spde)
+```
+
+## Run models
+
+```{r}
+mod.sep = inla(f.sep,
+                data = inla.stack.data(stack.sep),
+                family = 'Gamma',
+                control.predictor = list(compute = TRUE, A = inla.stack.A(stack.sep), link=1),
+                control.inla = list(int.strategy='eb'), # Option improve computation time at cost of accuracy/precision
+                control.compute = list(waic=TRUE, config=TRUE))
+```
+
+```{r}
+# Model formula
+f.yridx = y ~ -1 + Intercept + 
+  dem + 
+  f(time, model = 'ar1', hyper = time.spec) +  #Temporal random effect modeled as AR1
+  f(yr.idx, model = spde)
+
+mod.yridx = inla(f.yridx,
+                 data = inla.stack.data(stack.sep),
+                 family = 'Gamma',
+                 control.predictor = list(compute = TRUE, A = inla.stack.A(stack.sep), link=1),
+                 control.inla = list(int.strategy='eb'), # Option improve computation time at cost of accuracy/precision
+                 control.compute = list(waic=TRUE, config=TRUE))
+```
+
+```{r}
+summary(mod.sep)
+```
+
+```{r}
+summary(mod.yridx)
+```
+## Kroenecker formulation
+
+```{r}
+# st.idx <- inla.spde.make.index('st.idx', spde$n.spde, 
+#                                n.group = length(unique(dat.train$Year.idx)))
+# A.st <- inla.spde.make.A(mesh,
+#                          loc=cbind(dat.train$East, dat.train$North),
+#                          group = dat.train$Year.idx)
+# 
+# yr.idx <- inla.spde.make.index('yr.idx', spde$n.spde)
+# A.yr <- inla.spde.make.A(mesh, 
+#                          loc=cbind(dat.train$East, dat.train$North), 
+#                          weights = dat.train$Year.mod)
+# 
+# # Make data stack
+# stack.kroen = inla.stack(
+#   data = list(y = dat.train$accum), 
+#   # A = list(1, 1, 1, A.yr),
+#   A = list(1, 1, A.st, A.yr),
+#   effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+#                  tibble(elev = dat.train$elev, dem=dat.train$dem, 
+#                         slope=dat.train$slope, aspect=dat.train$aspect, 
+#                         Year=dat.train$Year.mod),
+#                  st.idx, 
+#                  yr.idx),
+#   tag = 'dat')
+# 
+# # Priors for temporal autocorrelation
+# time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
+# 
+# # Model formula
+# f.kroen = y ~ -1 + Intercept + 
+#   dem + 
+#   f(st.idx, model = spde, group=st.idx.group, 
+#     control.group=list(model='ar1', hyper=time.spec)) +
+#   f(yr.idx, model = spde)
+```
+
+```{r}
+# mod.kroen = inla(f.kroen,
+#                 data = inla.stack.data(stack.kroen),
+#                 family = 'Gamma',
+#                 control.predictor = list(compute = TRUE, A = inla.stack.A(stack.kroen), link=1),
+#                 control.inla = list(int.strategy='eb'), # Option improve computation time at cost of accuracy/precision
+#                 control.compute = list(waic=TRUE, config=TRUE))
+# 
+# summary(mod.kroen)
+```
+
+## Model results
+
+```{r}
+t.marg = function(mod.marg, t.func, param.names=NULL, n=100) {
+  
+  if (any(class(mod.marg) == "matrix")) {
+    mod.marg = list(mod.marg)
+    if (!is.null(param.names)) {
+      names(mod.marg = param.names)
+    } else {
+      names(mod.marg) = "UNNAMED"
+    }
+  }
+  
+  if (is.null(param.names)) {
+    param.names = names(mod.marg)
+  }
+  
+    if (is.list(t.func) != TRUE) {
+    t.func = list(t.func)
+  }
+  if (length(t.func) == 1) {
+    t.func = rep(t.func, length(param.names))
+  }
+  
+  # Preallocate output tbl
+  out = tibble(x=numeric(), y=numeric(), Param=vector(mode="character"))
+  
+  marg.names = names(mod.marg)
+  
+  for (i in 1:length(marg.names)) {
+    marg.i = inla.tmarginal(t.func[[i]], mod.marg[[marg.names[i]]], n=n)
+    out = out %>% bind_rows(tibble(x=marg.i[,1], y=marg.i[,2], Param=param.names[i]))
+  }
+  return(out)
+}
+```
+
+```{r}
+marg.fixed = t.marg(mod.sep$marginals.fixed, function(x) exp(x))
+HP.names = c("Gamma precision", 
+             "Range for spat.idx", "Stdev for spat.idx", 
+             "Time precision", "Rho for time", 
+             "Range for yr.idx", "Stdev for yr.idx")
+marg.hyper = t.marg(mod.sep$marginals.hyperpar, function(x) (x), param.names = HP.names)
+p.selection = c("Intercept", "dem", "Gamma precision", 
+                "Range for spat.idx", "Stdev for spat.idx", 
+                "Time precision", "Rho for time", 
+                "Range for yr.idx", "Stdev for yr.idx")
+
+post.sep = marg.fixed %>% bind_rows(marg.hyper) %>% filter(Param %in% p.selection)
+```
+
+```{r post-sep, fig.width=16}
+ggplot(post.sep, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param), scales = "free") + 
+  theme(text = element_text(size = 20))  
+```
+
+Posteriors for model with no extra spatial random effect.
+```{r}
+marg.fixed = t.marg(mod.yridx$marginals.fixed, function(x) exp(x))
+HP.names = c("Gamma precision", 
+             "Time precision", "Rho for time", 
+             "Range for yr.idx", "Stdev for yr.idx")
+marg.hyper = t.marg(mod.yridx$marginals.hyperpar, function(x) (x), param.names = HP.names)
+p.selection = c("Intercept", "dem", "Gamma precision", 
+                "Time precision", "Rho for time", 
+                "Range for yr.idx", "Stdev for yr.idx")
+
+post.yridx = marg.fixed %>% bind_rows(marg.hyper) %>% filter(Param %in% p.selection)
+```
+
+```{r post-yridx, fig.width=16}
+ggplot(post.yridx, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param), scales = "free") + 
+  theme(text = element_text(size = 20))  
+```
+
+## Investigating the components of prediction
+
+```{r}
+pred.trace = gdf_traces[seq(1,nrow(gdf_traces),3),] %>% mutate(color=as.factor(trace_ID))
+dat.pred = dat %>% filter(trace_ID %in% pred.trace$trace_ID) %>% mutate(color=as.factor(trace_ID))
+
+Years = sort(unique(dat.train$Year))
+loc.pred = st_coordinates(pred.trace) %x% rep(1, length(Years))
+covar.pred = dat.pred %>% select(trace_ID, dem) %>%
+  group_by(trace_ID) %>% filter(row_number()==1)
+yr.mod = rep(Years - mean(Years), nrow(pred.trace))
+st.pred = tibble(X=loc.pred[,1], Y=loc.pred[,2], Year = rep(Years, nrow(pred.trace)), 
+                 dem=rep(covar.pred$dem, each=length(Years)))
+
+proj.pred = inla.mesh.projector(mesh=mesh, loc = loc.pred)
+```
+
+```{r}
+spat.RE_sep = inla.mesh.project(proj.pred, mod.sep$summary.random$spat.idx$mean)
+time.RE_sep = rep(mod.sep$summary.random$time$mean, nrow(pred.trace))
+trnd.RE_sep = inla.mesh.project(proj.pred, mod.sep$summary.random$yr.idx$mean)
+
+# Construct linear predictor for each spacetime point
+lin.est_sep = mod.sep$summary.fixed$mean[1] + 
+  mod.sep$summary.fixed$mean[2]*st.pred$dem + 
+  spat.RE_sep + time.RE_sep + 
+  trnd.RE_sep*yr.mod
+
+pred.sep = st.pred %>% 
+  mutate(fx.RE=mod.sep$summary.fixed$mean[2]*st.pred$dem, spat.RE=spat.RE_sep, 
+         time.RE=time.RE_sep, trnd.RE=trnd.RE_sep*yr.mod, pred=exp(lin.est_sep)) %>% 
+  mutate(pred.sd=sqrt(pred^2/mod.sep$summary.hyperpar$mean[1]), 
+         Model='sep', 
+         color=rep(pred.trace$color, each=length(Years)))
+```
+
+```{r}
+time.RE_yr = rep(mod.yridx$summary.random$time$mean, nrow(pred.trace))
+trnd.RE_yr = inla.mesh.project(proj.pred, mod.yridx$summary.random$yr.idx$mean)
+
+# Construct linear predictor for each spacetime point
+lin.est_yr = mod.yridx$summary.fixed$mean[1] + 
+  mod.yridx$summary.fixed$mean[2]*st.pred$dem + 
+  time.RE_yr + 
+  trnd.RE_yr*yr.mod
+
+pred.yr = st.pred %>% 
+  mutate(fx.RE=mod.yridx$summary.fixed$mean[2]*st.pred$dem, spat.RE=NA, 
+         time.RE=time.RE_yr, trnd.RE=trnd.RE_yr*yr.mod, pred=exp(lin.est_yr)) %>% 
+  mutate(pred.sd=sqrt(pred^2/mod.yridx$summary.hyperpar$mean[1]), 
+         Model='yr.idx', 
+         color=rep(pred.trace$color, each=length(Years)))
+
+pred.comb = pred.sep %>% bind_rows(pred.yr)
+
+spat.pred = pred.comb %>% group_by(Model, color) %>% summarize_all(mean, rm.na=TRUE)
+spat.pred[1:(nrow(spat.pred)/2),'trend'] = trnd.RE_sep[seq(1,length(trnd.RE_sep), 
+                                      by=(length(trnd.RE_sep)/(nrow(spat.pred)/2)))]
+spat.pred[(1+nrow(spat.pred)/2):nrow(spat.pred),'trend'] = 
+  trnd.RE_yr[seq(1,length(trnd.RE_yr), 
+                  by=(length(trnd.RE_yr)/(nrow(spat.pred)/2)))]
+```
+
+```{r}
+ggplot(spat.pred, aes(x=X,y=Y, color=pred)) + 
+  geom_point() + scale_color_viridis_c() + 
+  facet_wrap(vars(Model))
+ggplot(spat.pred, aes(x=X,y=Y, color=fx.RE)) + 
+  geom_point() + scale_color_gradient2() + 
+  facet_wrap(vars(Model))
+ggplot(spat.pred %>% filter(Model=="sep")) + 
+  geom_point(aes(x=X, y=Y, color=spat.RE)) + scale_color_gradient2()
+ggplot(spat.pred, aes(x=X,y=Y, color=trend)) + 
+  geom_point() + scale_color_gradient2() + 
+  facet_wrap(vars(Model))
+```
+
+```{r}
+mod.time = tibble(Year=Years, mu=mod.sep$summary.random$time$mean, 
+                  sd=mod.sep$summary.random$time$sd, Model='sep')
+tmp.time = tibble(Year=Years, mu=mod.yridx$summary.random$time$mean, 
+                  sd=mod.yridx$summary.random$time$sd, Model='yr.idx')
+mod.time = mod.time %>% bind_rows(tmp.time)
+# ggplot(st.pred %>% group_by(Year) %>% summarise(time.RE=mean(time.RE))) + 
+#   geom_line(aes(x=Year, y=time.RE))
+ggplot(mod.time) + geom_hline(yintercept = 0, color='black') + 
+  geom_ribbon(aes(x=Year, ymin=mu-sd, ymax=mu+sd, group=Model, fill=Model), alpha=0.2) + 
+  geom_line(aes(x=Year, y=mu, group=Model, color=Model))
+```
+
+Calculate probability that trend is less than zero.
+```{r}
+P.neg1 = vector(mode = "numeric", length = length(mod.sep$marginals.random$yr.idx))
+for (i in 1:length(P.neg1)) {
+  marg.i = inla.tmarginal(function(x) x, 
+                          mod.sep$marginals.random$yr.idx[[i]], 
+                          n=500)
+  P.i = diff(marg.i[,1]) * marg.i[1:(nrow(marg.i)-1),2]
+  P.neg1[i] = sum(P.i[which(marg.i[1:(nrow(marg.i)-1),1]<0)])
+}
+tmp1 = tibble(Model='sep', 
+             East=mesh$loc[,1], North=mesh$loc[,2], 
+             med=mod.sep$summary.random$yr.idx$`0.5quant`, 
+             P.neg=P.neg1, 
+             LB=mod.sep$summary.random$yr.idx$`0.025quant`, 
+             UB=mod.sep$summary.random$yr.idx$`0.975quant`) %>% 
+  st_as_sf(coords=c("East", "North"), crs=3031)
+
+
+P.neg2 = vector(mode = "numeric", length = length(mod.yridx$marginals.random$yr.idx))
+for (i in 1:length(P.neg2)) {
+  marg.i = inla.tmarginal(function(x) x, 
+                          mod.yridx$marginals.random$yr.idx[[i]], 
+                          n=500)
+  P.i = diff(marg.i[,1]) * marg.i[1:(nrow(marg.i)-1),2]
+  P.neg2[i] = sum(P.i[which(marg.i[1:(nrow(marg.i)-1),1]<0)])
+}
+tmp2 = tibble(Model="yr.idx",
+             East=mesh$loc[,1], North=mesh$loc[,2], 
+             med=mod.yridx$summary.random$yr.idx$`0.5quant`, 
+             P.neg=P.neg2, 
+             LB=mod.yridx$summary.random$yr.idx$`0.025quant`, 
+             UB=mod.yridx$summary.random$yr.idx$`0.975quant`) %>% 
+  st_as_sf(coords=c("East", "North"), crs=3031)
+
+neg.tmp = tmp1 %>% bind_rows(tmp2)
+```
+
+Map of estimated trends with probability of less than zero
+```{r}
+trends.comp = dat.mu %>% select(-trace_ID, -accum, -estimate)  %>% 
+  rename(med=log.est) %>% 
+  mutate(LB=NA, UB=NA, P.neg=NA, Model="data") %>% 
+  st_as_sf(coords=c("East", "North"), crs=3031) %>%
+  bind_rows(neg.tmp)
+```
+
+```{r}
+ggplot(trends.comp) + geom_density(aes(x=med, group=Model, color=Model)) + 
+  xlim(c(-0.1,0.1))
+
+ggplot(trends.comp, aes(color=med)) + 
+  geom_sf() + scale_color_gradient2(limits=c(-0.05, 0.05)) + 
+  facet_wrap(vars(Model))
+
+ggplot(trends.comp %>% filter(Model!="data")) +
+  geom_sf(aes(color=(UB-LB)/2)) + 
+  scale_color_viridis_c(option = "plasma", trans="log") + 
+  facet_wrap(vars(Model))
+
+ggplot(trends.comp %>% filter(Model!="data")) +
+  geom_sf(aes(color=P.neg)) + 
+  scale_color_viridis_c() + 
+  facet_wrap(vars(Model))
+
+ggplot(trends.comp %>% filter(Model!="data")) + 
+  geom_density(aes(x=P.neg, group=Model, color=Model))
+```
