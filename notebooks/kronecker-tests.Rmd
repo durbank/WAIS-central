@@ -20,21 +20,27 @@ library(spdep)
 data = readRDS(here('data/Rdata-clean.rds'))
 gdf_traces = readRDS(here('data/Rdata-gdf_trace.rds'))
 
-set.seed(777)
-gdf_traces = gdf_traces %>% sample_frac(0.01)
-
 # # Subset to smaller region
 # tmp = st_bbox(gdf_traces)
-# East = c(tmp[1] + (tmp[3]-tmp[1])/7, tmp[1] + (tmp[3]-tmp[1])/2)
-# North = c(tmp[2] + (tmp[4]-tmp[2])/2, tmp[4] - (tmp[4]-tmp[2])/8)
+# # East = c(tmp[1] + (tmp[3]-tmp[1])/7, tmp[1] + (tmp[3]-tmp[1])/2)
+# # North = c(tmp[2] + (tmp[4]-tmp[2])/2, tmp[4] - (tmp[4]-tmp[2])/8)
+# East = c(tmp[1] + (tmp[3]-tmp[1])/7, tmp[3])
+# North = c(tmp[2], tmp[2] + (tmp[4]-tmp[2])/5)
 # tmp.df = tibble(East=East, North=North)
 # poly = tmp.df %>%
 #   st_as_sf(coords = c("East", "North"),
 #            crs = 3031) %>%
 #   st_bbox() %>%
 #   st_as_sfc()
+# ggplot() + geom_sf(data=poly) + geom_sf(data=gdf_traces)
 # gdf.idx = sapply(st_intersects(gdf_traces, poly),function(x){length(x)==0})
 # gdf_traces = gdf_traces[!gdf.idx,]
+
+set.seed(777)
+# gdf_traces = gdf_traces %>% sample_frac(0.05)
+skip.int = 5
+gdf.idx = seq(1, nrow(gdf_traces), by=skip.int)
+gdf_traces = gdf_traces[gdf.idx,]
 
 data = data %>% filter(trace_ID %in% gdf_traces$trace_ID) %>% 
   filter(Year >= 1979) %>% filter(Year < 2010) %>% arrange(trace_ID, Year)
@@ -68,13 +74,24 @@ dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
 dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
 ```
 
+Directly calculate linear coefficients of time from raw data.
+```{r}
+yr.trends = dat.train %>% 
+  group_by(trace_ID) %>% 
+  do(tidy(lm(accum ~ Year.mod, data = .))) %>% 
+  filter(term=='Year.mod') %>% select(-term)
+dat.mu = dat.train %>% group_by(trace_ID) %>% 
+  summarize(East=mean(East), North=mean(North), accum=mean(accum)) %>% 
+  left_join(yr.trends %>% select(trace_ID, estimate)) %>% 
+  mutate(log.est = log(1+(estimate/accum)))
+```
 
 ```{r}
 # More coarse mesh for development purposes
-mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
                     max.edge = c(60000, 120000), cutoff = 12000)
-# mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
-#                     max.edge = c(30000, 90000), cutoff = 1000)
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
+                    max.edge = c(30000, 90000), cutoff = 2000)
 plot(mesh)
 points(dat.train %>% select(East, North), col = "red")
 
@@ -113,19 +130,43 @@ form = y ~ -1 + Intercept + #modeling the intercept
   f(yr.idx, model = spde) #Global effect from year and deviation from global (modeled as a spatial random effect with weights given by Year)
 ```
 
+Indexing the spacetime function by year directly, rather than having two seperate terms for it (I'm not sure this will work because we don't have unique year values for each spacetime point).
+```{r}
+A.st <- inla.spde.make.A(mesh, 
+                         loc=cbind(dat.train$East, dat.train$North), 
+                         group = dat.train$Year.idx, 
+                         weights = dat.train$Year.mod)
+
+
+dat.stack <- inla.stack(
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, A.st),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        # slope=dat.train$slope, aspect=dat.train$aspect, 
+                        Year=dat.train$Year.mod),
+                 st.idx),
+  tag = 'dat')
+
+form = y ~ -1 + Intercept + #modeling the intercept
+  f(st.idx, model = spde, group=st.idx.group, 
+    control.group=list(model='ar1'))
+```
+
 ## Gamma modeling
 
 ```{r mod-gamma, cache=TRUE}
 # For testing, initially use gaussian
 
-# mod.gamma = inla(form,
-#                data = inla.stack.data(dat.stack),
-#                family = 'Gamma',
-#                control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link=1),
-#                control.inla = list(int.strategy='eb', strategy = 'gaussian'), # Options improve computation time at cost of accuracy/precision
-#                control.compute = list(waic=TRUE, config=TRUE))
-mod.gamma = readRDS(here('data/interim_results/mod-gamma.rds'))
+mod.gamma = inla(form,
+               data = inla.stack.data(dat.stack),
+               family = 'Gamma',
+               control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link=1),
+               # control.inla = list(strategy = 'simplified.laplace', int.strategy='ccd'), # Options improve computation time at cost of accuracy/precision
+               control.inla = list(strategy = 'gaussian', int.strategy='eb'), 
+               control.compute = list(waic=TRUE, config=TRUE))
 
+# mod.gamma = readRDS(here('data/interim_results/mod-gamma.rds'))
 summary(mod.gamma)
 ```
 
@@ -143,18 +184,6 @@ summary(glm.gamma)
 ```
 
 ### Posterior checks
-
-Directly calculate linear coefficients of time from raw data.
-```{r}
-yr.trends = dat.train %>% 
-  group_by(trace_ID) %>% 
-  do(tidy(lm(accum ~ Year.mod, data = .))) %>% 
-  filter(term=='Year.mod') %>% select(-term)
-dat.mu = dat.train %>% group_by(trace_ID) %>% 
-  summarize(East=mean(East), North=mean(North), accum=mean(accum)) %>% 
-  left_join(yr.trends %>% select(trace_ID, estimate)) %>% 
-  mutate(log.est = log(1+(estimate/accum)))
-```
 
 ```{r}
 # Posterior draws for year coefficients
@@ -198,66 +227,119 @@ ggplot(trends.sf %>% filter(Source=="model")) +
 ## Spacetime random effect removed
 
 It's possible that I am removing temporal signal from my estimates when I model the spacetime auto-correlations.
-Here I run the model without this random effect for comparison (so only using a spatially varying temporal coefficient).
+Here I run the model without this random effect for comparison (so only using a spatially varying temporal coefficient and a separate temporal random effect).
 
 ```{r}
+# Make data stack
+stack.sep <- inla.stack(
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, 1, A.yr),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        slope=dat.train$slope, aspect=dat.train$aspect, 
+                        Year=dat.train$Year),
+                 list(time = dat.train$Year),
+                 yr.idx),
+  tag = 'dat')
+
+# Priors for temporal autocorrelation
+time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
+
 # Model formula
-f.noST = y ~ -1 + Intercept + 
+f.sep = y ~ -1 + Intercept + 
   # f(st.idx, model = spde, group=st.idx.group, 
   #   control.group=list(model='ar1')) + 
-  f(yr.idx, model = spde)
+  f(yr.idx, model = spde) + 
+  f(time, model = 'ar1', hyper = time.spec) #Temporal random effect modeled as AR1
 
-mod.noST = inla(f.noST,
-                data = inla.stack.data(dat.stack),
+mod.sep = inla(f.sep,
+                data = inla.stack.data(stack.sep),
                 family = 'Gamma',
-                control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link=1),
-                control.inla = list(int.strategy='eb', strategy = 'gaussian'), # Options improve computation time at cost of accuracy/precision
+                control.predictor = list(compute = TRUE, A = inla.stack.A(stack.sep), link=1),
+                control.inla = list(int.strategy='eb'), # Option improve computation time at cost of accuracy/precision
                 control.compute = list(waic=TRUE, config=TRUE))
 
-summary(mod.noST)
+summary(mod.sep)
 ```
 
 ### Posterior checks
 
+Extract marginal distributions for subset of coefficients (for plotting purposes)
+```{r}
+n=50
+idx.set = as.integer(seq(1,spde$n.spde, length.out=n))
+marg.set = mod.sep$marginals.random$yr.idx[idx.set]
+
+# Create tbl of marginals
+marg.tbl = tibble()
+for (i in 1:length(idx.set)) {
+  set.i = marg.set[[i]]
+  tbl.i = tibble(Index = idx.set[i], X=set.i[,1], Y=set.i[,2])
+  marg.tbl = marg.tbl %>% bind_rows(tbl.i)
+}
+
+ggplot(marg.tbl) + geom_line(aes(x=X, y=Y, group=Index), color='black', alpha=0.1)
+```
+
+Calculate probability that trend is less than zero.
+```{r}
+P.neg = vector(mode = "numeric", length = length(mod.sep$marginals.random$yr.idx))
+for (i in 1:length(P.neg)) {
+  marg.i = inla.tmarginal(function(x) x, 
+                          mod.sep$marginals.random$yr.idx[[i]], 
+                          n=500)
+  P.i = diff(marg.i[,1]) * marg.i[1:(nrow(marg.i)-1),2]
+  P.neg[i] = sum(P.i[which(marg.i[1:(nrow(marg.i)-1),1]<0)])
+}
+```
+
+Map of estimated trends with probability of less than zero
+```{r}
+tmp = tibble(Source="model", 
+             East=mesh$loc[,1], North=mesh$loc[,2], 
+             med=mod.sep$summary.random$yr.idx$`0.5quant`, 
+             P.neg=P.neg, 
+             LB=mod.sep$summary.random$yr.idx$`0.025quant`, 
+             UB=mod.sep$summary.random$yr.idx$`0.975quant`) %>% 
+  # mutate(weak=(LB<0 && UB>0)) %>% 
+  st_as_sf(coords=c("East", "North"), crs=3031)
+
+trends.sep = dat.mu %>% select(-trace_ID, -accum, -estimate)  %>% 
+  rename(med=log.est) %>% mutate(LB=NA, UB=NA, P.neg=NA, Source="data") %>% 
+  st_as_sf(coords=c("East", "North"), crs=3031) %>%
+  bind_rows(tmp)
+
+ggplot(trends.sep %>% filter(Source=="data")) + 
+  geom_sf(aes(color=med)) + scale_color_gradient2(limits=c(-0.05, 0.05))
+# ggplot(trends.sep %>% filter(Source=="model")) + 
+#   geom_sf(aes(color=LB)) + scale_color_gradient2(limits=c(-0.05, 0.05))
+ggplot(trends.sep %>% filter(Source=="model")) + 
+  geom_sf(aes(color=med)) + scale_color_gradient2(limits=c(-0.05, 0.05))
+# ggplot(trends.sep %>% filter(Source=="model")) + 
+#   geom_sf(aes(color=UB)) + scale_color_gradient2(limits=c(-0.05, 0.05))
+ggplot(trends.sep %>% filter(Source=='model')) + 
+  geom_sf(aes(color=P.neg)) + scale_color_viridis_c()
+```
+
+
 ```{r}
 # Posterior draws for year coefficients
-draws=100
+draws=10
 n.locs = spde$n.spde
-samples.noST = inla.posterior.sample(draws, result = mod.noST)
-tmp = inla.posterior.sample.eval(c("yr.idx"), samples.noST)
-ppc.noST = tibble(Sample=rep(1:draws, each=n.locs), coeff=as.vector(tmp))
+samples.sep = inla.posterior.sample(draws, result = mod.sep)
+tmp = inla.posterior.sample.eval(c("yr.idx"), samples.sep)
+ppc.sep = tibble(Sample=rep(1:draws, each=n.locs), coeff=as.vector(tmp))
 
-ggplot(ppc.noST %>% group_by(Sample)) + 
+ggplot(ppc.sep %>% group_by(Sample)) + 
   geom_line(aes(x=coeff, group=Sample), stat="density", alpha=0.1) + 
   geom_density(data=dat.mu, aes(x=log.est), color='red') + 
-  xlim(c(-0.03, .03))
+  xlim(c(-0.06, .06))
+
 ```
 
 ### Spatial comparisons
 
-```{r}
-tmp = tibble(Source="model", 
-             East=mesh$loc[,1], North=mesh$loc[,2], 
-             med=mod.noST$summary.random$yr.idx$`0.5quant`, 
-             LB=mod.noST$summary.random$yr.idx$`0.025quant`, 
-             UB=mod.noST$summary.random$yr.idx$`0.975quant`) %>% 
-  # mutate(weak=(LB<0 && UB>0)) %>% 
-  st_as_sf(coords=c("East", "North"), crs=3031)
 
-trends.noST = dat.mu %>% select(-trace_ID, -accum, -estimate)  %>% 
-  rename(med=log.est) %>% mutate(LB=NA, UB=NA, Source="data") %>% 
-  st_as_sf(coords=c("East", "North"), crs=3031) %>%
-  bind_rows(tmp)
-
-ggplot(trends.noST %>% filter(Source=="data")) + 
-  geom_sf(aes(color=med)) + scale_color_gradient2(limits=c(-0.03, 0.03))
-ggplot(trends.noST %>% filter(Source=="model")) + 
-  geom_sf(aes(color=LB)) + scale_color_gradient2(limits=c(-0.03, 0.03))
-ggplot(trends.noST %>% filter(Source=="model")) + 
-  geom_sf(aes(color=med)) + scale_color_gradient2(limits=c(-0.03, 0.03))
-ggplot(trends.noST %>% filter(Source=="model")) + 
-  geom_sf(aes(color=UB)) + scale_color_gradient2(limits=c(-0.03, 0.03))
-```
 
 
 ## Lognormal modeling
