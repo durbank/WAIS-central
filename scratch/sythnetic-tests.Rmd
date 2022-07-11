@@ -1,0 +1,258 @@
+---
+title: "Synthetic tests of spatially varying time coefficient"
+output: html_notebook
+---
+
+This notebook is just to experiment some with some synthetic data to see if I can reproduce the methods.
+These tests are based off of examples in an [R-inla discussion post](https://groups.google.com/g/r-inla-discussion-group/c/X_g4NuqqHfY) and the [section on dynamic space-time regression](https://becarioprecario.bitbucket.io/spde-gitbook/ch-stapp.html#dynamic-space-time-regression) in [Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA](https://becarioprecario.bitbucket.io/spde-gitbook/index.html).
+
+```{r}
+library(tidyverse)
+library(INLA)
+library(INLAutils)
+library(spdep)
+```
+
+## Data generation
+
+We need a function to add spatial correlation to our data.
+The below function, provided with the [Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA](https://becarioprecario.bitbucket.io/spde-gitbook/index.html) RBook, does just that.
+```{r}
+book.rMatern <- function(n, coords, sigma=1, range, kappa = sqrt(8*nu)/range, variance = sigma^2, nu=1) {
+    m <- as.matrix(dist(coords))
+    m <- exp((1-nu)*log(2) + nu*log(kappa*m)-
+             lgamma(nu))*besselK(m*kappa, nu)
+    diag(m) <- 1
+    return(drop(crossprod(chol(variance*m),
+                          matrix(rnorm(nrow(coords)*n), ncol=n))))
+}
+```
+
+We then define the model parameters/hyperparameters that we wish to recover with our model.
+These consist of a global intercept, a global coefficient for the temporal trend, the effective range of our spatial correlation, the variability of our spatial correlation, the strength of the temporal correlation, and the iid Gaussian noise in our observations.
+```{r}
+alpha = 5.7
+beta.G = -0.10
+sp.range = 3300
+sp.sigma = 0.05
+rho = 0.8
+tau.e = 20
+```
+
+We next generate $n=100$ sample locations and draw $k=10$ independent samples at each location from a Matern GRF (using the above function).
+```{r}
+n <- 100
+k = 10
+set.seed(1)
+coo <- round(10000 * matrix(runif(2 * n), n))
+
+set.seed(2)
+beta.i <- book.rMatern(k, coo, range = sp.range, sigma = sp.sigma)
+```
+
+We then add temporal correlation to each time series using an $AR1$ process
+```{r}
+beta.i[, 1] <- beta.i[, 1] / (1 - rho^2)
+
+for (j in 2:k) {
+  beta.i[, j] <- beta.i[, j-1]*rho + beta.i[, j]*(1 - rho^2)
+}
+```
+
+We then assign a year index, generate iid Gaussian noise, and combine our components to generate our observed values.
+```{r}
+# Define year index
+Year = matrix(1:k, nrow=nrow(coo), ncol=k, byrow=TRUE)
+
+set.seed(3)
+# Error in the observation
+error <- rnorm(n * k, 0, sqrt(1 / tau.e)) 
+
+# Dynamic regression part
+y <- alpha + (beta.G + beta.i) * Year + error
+
+loc = tibble(idx=as.integer(1:nrow(coo)), East=coo[,1], North=coo[,2])
+data = tibble(y=as.vector(y), idx=rep(loc$idx,k), 
+              East=rep(loc$East,k), North=rep(loc$North, k), 
+              Year=as.vector(Year), 
+              B.i = as.vector(beta.i))
+```
+
+Here's the variability and range in trends for these data.
+```{r}
+ggplot(data, aes(x=Year, y=y, group=idx)) + geom_line( alpha=0.1) + geom_smooth(method='lm', alpha=0.2)
+```
+
+
+## Create model
+
+```{r}
+mesh <- inla.mesh.2d(coo, max.edge = c(1000, 5000), cutoff = 100)
+plot(mesh)
+points(loc %>% select(-idx), col = "red")
+
+spde <- inla.spde2.pcmatern(mesh = mesh,
+  prior.range = c(500, 0.01), # P(practic.range < 0.05) = 0.01
+  prior.sigma = c(0.1, 0.01)) # P(sigma > 1) = 0.01
+```
+
+```{r}
+yrdiff.idx <- inla.spde.make.index('yrdiff.idx', spde$n.spde, 
+                                     n.group = max(unique(data$Year)))
+A.yrdiff <- inla.spde.make.A(mesh, cbind(data$East, data$North), 
+                             group = data$Year)#, weights = hh)
+
+# A.spat <- inla.spde.make.A(mesh, cbind(data$East, data$North), 
+#                            group = data$Year)
+# spat.idx <- inla.spde.make.index('spat.field', spde$n.spde, 
+#                                  n.group = max(unique(data$Year)))
+
+# # Make data stack
+# dat.stack <- inla.stack(
+#   data = list(y = data$y),
+#   A = list(1, 1, A.yrdiff, A.spat, 1),
+#   effects = list(list(Intercept = rep(1, nrow(data))),
+#                  tibble(Year=data$Year),
+#                  yrdiff.idx, 
+#                  spat.idx, 
+#                  list(time=data$Year)),
+#   tag = 'dat')
+
+# Make data stack
+dat.stack <- inla.stack(
+  data = list(y = data$y),
+  A = list(1, 1, A.yrdiff),
+  effects = list(list(Intercept = rep(1, nrow(data))),
+                 tibble(Year=data$Year),
+                 yrdiff.idx),
+  tag = 'dat')
+```
+
+```{r}
+# # Still experimenting with with one
+# form <- y ~ -1 + Intercept + Year + 
+#   f(yrdiff.idx, data$Year, model = spde, group = yrdiff.idx.group, 
+#     control.group = list(model = 'ar1'))
+
+# This one I know works well!
+form <- y ~ -1 + Intercept + Year + 
+  f(yrdiff.idx, model = spde, group = yrdiff.idx.group, 
+    control.group = list(model = 'ar1'))
+```
+
+## Fit model
+
+```{r}
+mod <- inla(form, family = 'gaussian',
+  data = inla.stack.data(dat.stack), 
+  control.predictor = list(A = inla.stack.A(dat.stack)), 
+  control.compute = list(config =TRUE))
+```
+
+## Evalulate model performance
+
+```{r}
+summary(mod)
+```
+
+
+```{r}
+dist.Bi = tibble(B.i = mod$summary.random$yrdiff.idx$mean, class = "Mod")
+tmp = data %>% select(B.i) %>% mutate(class = "Obs")
+dist.Bi = dist.Bi %>% bind_rows(tmp)
+
+mod.marg = tibble(x = mod$marginals.fixed$Intercept[,1], 
+                  y = mod$marginals.fixed$Intercept[,2], 
+                  Param = "Intercept")
+tmp = tibble(x = mod$marginals.fixed$Year[,1], 
+                  y = mod$marginals.fixed$Year[,2], 
+                  Param = "Year")
+mod.marg = mod.marg %>% bind_rows(tmp)
+
+hyper.names = c("Precision", "Range", "Stdev", "Rho")
+for (i in 1:length(hyper.names)) {
+  tmp = tibble(x=mod$marginals.hyperpar[[i]][,1], y=mod$marginals.hyperpar[[i]][,2], 
+               Param=hyper.names[i])
+  mod.marg = mod.marg %>% bind_rows(tmp)
+}
+
+param.vals = tibble(x = c(alpha, beta.G, tau.e, sp.range, sp.sigma, rho), 
+                    Param = c("Intercept", "Year", hyper.names))
+
+ggplot(mod.marg, aes(x=x,y=y)) + geom_line() + 
+  geom_vline(data=param.vals, aes(xintercept = x), color='red') + 
+  facet_wrap(vars(Param), scales = "free")
+
+# ggplot(mod.marg %>% filter(Param=="Year")) + geom_line(aes(x=x,y=y)) + 
+#   geom_vline(xintercept = mu.beta[2], color='red') + xlab("Global year coefficient")
+
+ggplot(dist.Bi, aes(x=B.i, group=class, fill=class)) + 
+  geom_density(alpha=0.3) + xlab("Deviations from fixed year coeff")
+
+
+```
+
+
+
+
+
+
+
+<!-- ### Experimental model -->
+
+<!-- ```{r} -->
+<!-- mesh <- inla.mesh.2d(coo, max.edge = c(1000, 5000), cutoff = 100) -->
+<!-- plot(mesh) -->
+<!-- points(loc %>% select(-idx), col = "red") -->
+
+<!-- spde <- inla.spde2.pcmatern(mesh = mesh, -->
+<!--   prior.range = c(500, 0.01), # P(practic.range < 0.05) = 0.01 -->
+<!--   prior.sigma = c(0.1, 0.01)) # P(sigma > 1) = 0.01 -->
+
+<!-- # Create projector matrix for SPDE mesh -->
+<!-- A.spat = inla.spde.make.A(mesh = mesh, -->
+<!--                           loc = cbind(data$East, data$North), -->
+<!--                           group = data$Year) -->
+<!-- A.yrdiff = inla.spde.make.A(mesh = mesh,  -->
+<!--                             loc = cbind(data$East, data$North)) -->
+
+<!-- # Assign index vectors for SPDE model. -->
+<!-- yrdiff.idx = inla.spde.make.index(name = "yr.diff",  -->
+<!--                                 n.spde = spde$n.spde) -->
+
+<!-- spat.idx = inla.spde.make.index(name = "spat.field", -->
+<!--                                 n.spde = spde$n.spde, -->
+<!--                                 n.group = max(data$Year)) -->
+
+<!-- # Make data stack -->
+<!-- dat.stack <- inla.stack( -->
+<!--   data = list(y = data$y), -->
+<!--   A = list(1, 1, A.yrdiff, A.spat, 1), -->
+<!--   effects = list(list(Intercept = rep(1, nrow(data))), -->
+<!--                  tibble(Year=data$Year), -->
+<!--                  yrdiff.idx,  -->
+<!--                  spat.idx,  -->
+<!--                  list(time=data$Year)), -->
+<!--   tag = 'dat') -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- # form <- y ~ -1 + Intercept + -->
+<!-- #   Year -->
+
+<!-- # form <- y ~ -1 + Intercept + -->
+<!-- #   Year + f(yr.diff, Year, model = spde) -->
+
+<!-- form <- y ~ -1 + Intercept + -->
+<!--   Year + f(yr.diff, Year, model = spde) + -->
+<!--   f(time, model = 'ar1') -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- res.dev <- inla(form, family = 'gaussian', -->
+<!--   data = inla.stack.data(dat.stack),  -->
+<!--   control.predictor = list(A = inla.stack.A(dat.stack)),  -->
+<!--   control.compute = list(config =TRUE)) -->
+<!-- ``` -->
+

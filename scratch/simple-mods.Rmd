@@ -1,0 +1,328 @@
+---
+title: "Experimentation with Gaussians and GLM results"
+output: html_notebook
+---
+
+## Imports
+
+```{r message=FALSE, warning=FALSE}
+library(here)
+library(tidyverse)
+library(cetcolor)
+library(sf)
+library(terra)
+library(INLA)
+library(INLAutils)
+library(spdep)
+```
+
+## Data preprocessing
+
+```{r message=FALSE}
+data_long = read_csv(here('data/paipr-long.csv')) %>% select(-...1) %>% 
+  mutate(Year = as.integer(Year))
+gdf_traces = st_read(here('data/traces.geojson')) %>% as_tibble() %>% st_as_sf()
+
+# Remove points in far northern extent
+accum_bnds = st_coordinates(gdf_traces)
+gdf_traces = gdf_traces %>% st_crop(xmin=-1.5e6, xmax=max(accum_bnds[,1]),
+                                    ymin=min(accum_bnds[,2]), ymax=max(accum_bnds[,2]))
+
+# Remove unrealistically high elevations and overly large accum sites
+trace_drop = gdf_traces %>% filter(elev > 3000 | accum > 1000)
+
+# Add East/North coordinates and drop filtered sites
+pts_tmp = st_coordinates(gdf_traces)
+coord_df = tibble(trace_ID = gdf_traces$trace_ID, East = pts_tmp[,1], North = pts_tmp[,2])
+data = data_long %>% left_join(coord_df) %>% filter(!trace_ID %in% trace_drop$trace_ID)
+gdf_traces = gdf_traces %>% filter(!trace_ID %in% trace_drop$trace_ID)
+```
+
+```{r}
+REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m")
+dem = rast(file.path(REMA.dir, "REMA_200m_dem.tif"))
+crs(dem) = st_crs(gdf_traces)$wkt
+
+slp = rast(file.path(REMA.dir, "REMA_200m_slope.tif"))
+crs(slp) = crs(dem)
+
+aspct = rast(file.path(REMA.dir, "REMA_200m_aspect.tif"))
+crs(aspct) = crs(dem)
+
+topo.stk = c(dem, slp, aspct)
+
+topo.pts = extract(topo.stk, vect(gdf_traces$geometry)) %>% as_tibble() %>% 
+  rename(dem=REMA_200m_dem) %>% 
+  mutate(trace.ID=gdf_traces$trace_ID)
+topo.pts = topo.pts %>% select(-ID)
+
+
+
+RACMO.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data", 
+                      "/RACMO/2.3p2_yearly_ANT27_1979_2016/interim")
+files = list.files(path = RACMO.dir, full.names = TRUE, 
+                   pattern = "\\.tif$")
+
+r.smb = rast(files[1])
+names(r.smb) = 1979:2016
+smb.pts = extract(r.smb, vect(gdf_traces$geometry)) %>% 
+  as_tibble() %>% mutate(trace.ID=gdf_traces$trace_ID) %>% 
+  pivot_longer(cols = num_range(prefix='', range=1979:2016), 
+               names_to = 'Year', values_to = 'SMB') %>% 
+  mutate(Year = as.integer(Year))
+
+
+r.u10m = rast(files[2])
+names(r.u10m) = 1979:2016
+u10m.pts = extract(r.u10m, vect(gdf_traces$geometry)) %>% 
+  as_tibble() %>% 
+  pivot_longer(cols = num_range(prefix='', range=1979:2016), 
+               names_to = 'Year', values_to = 'u10m') %>% 
+  mutate(Year = as.integer(Year))
+
+
+r.v10m = rast(files[3])
+names(r.v10m) = 1979:2016
+v10m.pts = extract(r.v10m, vect(gdf_traces$geometry)) %>% 
+  as_tibble() %>% pivot_longer(cols = num_range(prefix='', range=1979:2016), 
+                               names_to = 'Year', values_to = 'v10m') %>% 
+  mutate(Year = as.integer(Year))
+
+racmo.pts = smb.pts %>% 
+  mutate(u10m=u10m.pts$u10m, v10m=v10m.pts$v10m) %>% 
+  select(-ID)
+
+data = data %>% 
+  left_join(racmo.pts, by = c("trace_ID" = "trace.ID", "Year")) %>% 
+  left_join(topo.pts, by = c("trace_ID" = "trace.ID"))
+
+# data = data %>% mutate(S_x = abs(slope)*cos(asin(aspect)), 
+#                        S_y = abs(slope)*aspect) %>% 
+#   mutate(MSWD = S_x*u10m + S_y*v10m)
+```
+
+```{r}
+set.seed(777)
+gdf.tmp = gdf_traces %>% sample_frac(0.01)
+data.tmp = data %>% filter(trace_ID %in% gdf.tmp$trace_ID) %>% 
+  filter(Year >= 1979) %>% filter(Year <= 2004) %>% arrange(trace_ID, Year)
+
+# Select variables of interest
+dat = data.tmp %>% select(trace_ID, East, North, Year, accum, 
+                      std, elev, dem, slope, aspect, u10m, v10m)
+# dat = data %>% select(trace_ID, East, North, Year, accum, 
+#                       std, elev, dem, slope, aspect, u10m, v10m)
+
+# Center covariates
+yr.min = min(dat$Year)-1
+dat = dat %>% 
+  mutate(Year = Year-yr.min, elev = scale(elev)[,1], 
+         dem=scale(dem)[,1], slope=scale(slope)[,1], 
+         aspect=sin(pi/180*aspect), 
+         u10m=scale(u10m)[,1], v10m=scale(v10m)[,1])
+
+# Split into training and testing sets
+dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
+dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
+dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
+```
+
+## INLA modeling
+
+```{r}
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
+                    max.edge = c(20000, 50000), cutoff = 1000)
+plot(mesh)
+points(dat.train %>% select(East, North), col = "red")
+```
+
+```{r}
+spde = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(5000, 0.05), # P(range < 5 km) = 0.01
+  prior.sigma = c(500, 0.05)) # P(sigma > 500 mm w.e.) = 0.05
+
+# Create projector matrix for SPDE mesh
+A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
+
+# Assign index vectors for SPDE model
+spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde)
+
+# Make data stack
+dat.stack <- inla.stack(
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, 1, A.spat),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        slope=dat.train$slope, aspect=dat.train$aspect, 
+                        u10m=dat.train$u10m, v10m=dat.train$v10m), 
+                 list(time = dat.train$Year), 
+                 spat.idx),
+  tag = 'dat') 
+```
+
+Base model (no random effects)
+```{r}
+# Prior on precision parameter for Gamma observations
+prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+
+
+# f.base = y ~ -1 + Intercept
+f.base = y ~ -1 + Intercept + dem + slope + aspect + slope*aspect
+
+# Model fitting
+mod.gauss <- inla(f.base, 
+                 data = inla.stack.data(dat.stack), 
+                 family = 'Gaussian', 
+                 control.family = list(
+                                       # hyper = list(prec=prec.prior), 
+                                       control.link=list(model="log")),
+                 control.predictor = list(compute = TRUE, 
+                                          A = inla.stack.A(dat.stack), 
+                                          link = 1),
+                 control.compute = list(waic = TRUE), 
+                 quantiles = NULL)
+# Model fitting
+mod.gamma <- inla(f.base, 
+                 data = inla.stack.data(dat.stack), 
+                 family = 'Gamma',
+                 control.family = list(hyper = list(prec = prec.prior)), 
+                 control.predictor = list(compute = TRUE, 
+                                          A = inla.stack.A(dat.stack), 
+                                          link = 1), 
+                 control.compute = list(waic = TRUE), 
+                 quantiles = NULL)
+
+# Fitting a frequentist GLM to data
+mod.glm <- glm(f.base, data = dat.train %>% rename(y=accum) %>% mutate(Intercept=1), 
+               family = gaussian(link = "log"))
+
+
+summary(mod.glm)
+```
+
+Compare marginal distributions of precision (transformed into original units as sqrt(Var)) between Gaussian and gamma models.
+```{r}
+compare_marginal = function(gauss.mod, gamma.mod, N=100) {
+  
+  gauss.var = inla.tmarginal(function(x) 1/x, gauss.mod$marginals.hyperpar$`Precision for the Gaussian observations`, n=N)
+  gamma.var = inla.tmarginal(function(x) exp(gamma.mod$summary.fixed$mean[1])^2/x, gamma.mod$marginals.hyperpar$`Precision parameter for the Gamma observations`, n=N)
+  
+  df1 = tibble(var.x=gauss.var[,1], var.y=gauss.var[,2], model = "Gaussian")
+  df2 = tibble(var.x=gamma.var[,1], var.y=gamma.var[,2], model = "Gamma")
+  
+  
+  for (i in 1:length(gauss.mod$names.fixed)) {
+    fixed.gauss = inla.tmarginal(function(x) x, gauss.mod$marginals.fixed[[i]], n=N)
+    fixed.gamma = inla.tmarginal(function(x) exp(x), gamma.mod$marginals.fixed[[i]], n=N)
+    df1 = df1 %>% mutate("{gauss.mod$names.fixed[i]}.x" := fixed.gauss[,1], 
+                         "{gauss.mod$names.fixed[i]}.y" := fixed.gauss[,2])
+    df2 = df2 %>% mutate("{gamma.mod$names.fixed[i]}.x" := fixed.gamma[,1], 
+                         "{gamma.mod$names.fixed[i]}.y" := fixed.gamma[,2])
+  }
+  # gauss.alpha = inla.tmarginal(function(x) x, gauss.mod$marginals.fixed$Intercept, n=N)
+  # gamma.alpha = inla.tmarginal(function(x) exp(x), gamma.mod$marginals.fixed$Intercept, n=N)
+  
+  if (any(str_detect(names(gauss.mod$marginals.hyperpar), "Range for"))) {
+    tmp1 = inla.tmarginal(function(x) x, 
+                         gauss.mod$marginals.hyperpar$`Range for spat.field`, 
+                         n=N)
+    tmp2 = inla.tmarginal(function(x) x, 
+                         gauss.mod$marginals.hyperpar$`Stdev for spat.field`, 
+                         n=N)
+    df1 = df1 %>% mutate(spat.range.x=tmp1[,1], spat.range.y=tmp1[,2], 
+                         spat.std.x=tmp2[,1], spat.std.y=tmp2[,2])
+  }
+  if (any(str_detect(names(gamma.mod$marginals.hyperpar), "Range for"))) {
+    tmp1 = inla.tmarginal(function(x) x, 
+                         gamma.mod$marginals.hyperpar$`Range for spat.field`, 
+                         n=N)
+    tmp2 = inla.tmarginal(function(x) x, 
+                         gamma.mod$marginals.hyperpar$`Stdev for spat.field`, 
+                         n=N)
+    df2 = df2 %>% mutate(spat.range.x=tmp1[,1], spat.range.y=tmp1[,2], 
+                         spat.std.x=tmp2[,1], spat.std.y=tmp2[,2])
+  }
+  
+  
+  df = df1 %>% bind_rows(df2)
+  return(df)
+}
+```
+
+```{r}
+df.base = compare_marginal(gauss.mod=mod.gauss, gamma.mod=mod.gamma)
+
+ggplot(df.base, aes(x=Intercept.x, y=Intercept.y, group=model, color=model)) + 
+  geom_line() + xlab('Intercept') + ylab('Density')
+ggplot(df.base, aes(x=dem.x, y=dem.y, group=model, color=model)) + 
+  geom_line() + xlab('Elevation effect') + ylab('Density')
+ggplot(df.base, aes(x=slope.x, y=slope.y, group=model, color=model)) + 
+  geom_line() + xlab('Slope effect') + ylab('Density')
+ggplot(df.base, aes(x=aspect.x, y=aspect.y, group=model, color=model)) + 
+  geom_line() + xlab('Aspect effect') + ylab('Density')
+ggplot(df.base, aes(x=sqrt(var.x), y=sqrt(var.y), group=model, color=model)) + 
+  geom_line() + xlab('St. dev') + ylab('Density')
+```
+
+Base model + spatial random effect
+```{r}
+# Prior on precision parameter for Gamma observations
+prec.prior = list(prior = 'pc.prec', param = c(500, 0.05)) #P(sigma > 250) = 10%
+
+f.sp = y ~ -1 + Intercept + 
+  dem + slope + aspect + slope*aspect + 
+  f(spat.field, model = spde) #spatial random effect
+mod.gauss_sp <- inla(f.sp, 
+                 data = inla.stack.data(dat.stack), 
+                 control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack)),
+                 family = 'Gaussian', 
+                 control.family = list(hyper = list(prec = prec.prior)),
+                 quantiles = NULL, 
+                 control.compute = list(waic = TRUE))
+mod.gamma_sp <- inla(f.sp, 
+                 data = inla.stack.data(dat.stack), 
+                 family = 'Gamma',
+                 control.family = list(hyper = list(prec = prec.prior)),
+                 control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1),
+                 quantiles = NULL, 
+                 control.compute = list(waic = TRUE))
+```
+
+```{r}
+df.sp = compare_marginal(gauss.mod=mod.gauss_sp, gamma.mod=mod.gamma_sp)
+
+ggplot(df.sp, aes(x=a.x, y=a.y, group=model, color=model)) + 
+  geom_line() + xlab('Intercept') + ylab('Density')
+ggplot(df.sp, aes(x=sqrt(var.x), y=sqrt(var.y), group=model, color=model)) + 
+  geom_line() + xlab('St. dev') + ylab('Density')
+ggplot(df.sp, aes(x=spat.range.x/1000, y=spat.range.y, group=model, color=model)) + 
+  geom_line() + xlab('Range of spatial effect (km)') + ylab('Density')
+ggplot(df.sp, aes(x=spat.std.x, y=spat.std.y, group=model, color=model)) + 
+  geom_line() + xlab('st. dev of spatial effect') + ylab('Density')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+## Define other priors (spatial field priors defined earlier)
+
+# Prior on autoregressive rho parameter
+time.spec = list(rho = list(prior = 'pc.cor1', param = c(0, 0.9)))
+
+# Prior on fixed effects intercept (not currently implemented)
+prior.fixed = list()
+```
+

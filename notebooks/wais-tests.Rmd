@@ -1,0 +1,538 @@
+---
+title: "WAIS testing"
+output: html_notebook
+---
+
+Just some tests of INLA modeling actually using my WAIS data.
+
+```{r}
+library(here)
+library(tidyverse)
+library(cetcolor)
+library(sf)
+library(tmap)
+library(terra)
+library(INLA)
+library(INLAutils)
+library(spdep)
+```
+
+```{r}
+data_long = read_csv(here('data/traces_long.csv')) %>% select(-...1)
+gdf_traces = st_read(here('data/geo_traces.geojson')) %>% as_tibble() %>% st_as_sf()
+
+# Remove points in far northern extent
+accum_bnds = st_coordinates(gdf_traces)
+gdf_traces = gdf_traces %>% st_crop(xmin=-1.5e6, xmax=max(accum_bnds[,1]), 
+                                    ymin=min(accum_bnds[,2]), ymax=max(accum_bnds[,2]))
+```
+
+```{r}
+# ## Find which REMA DEM 8-meter tiles intersect our dataset and download any tiles not
+# ## already present in the selected directory "output.dir"
+# 
+# # Select directory containing REMA mosaic tiles (based on currently-running OS)
+# os = Sys.info()['sysname']
+# if (os == 'Linux') {
+#   REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/tiles_8m_v1.1")
+# } else {
+#   REMA.dir = file.path("G:/Research/Antarctica/Data/DEMs/REMA/tiles_8m_v1.1")
+# }
+# # REMA.dir = tk_choose.dir(caption = "Select directory in which to save REMA mosaic tiles")
+# 
+# # Find all mosaics that intersect the accumulation dataset
+# index.file = file.path(dirname(REMA.dir), "REMA_Tile_Index_Rel1.1/REMA_Tile_Index_Rel1.1.shp")
+# dem.index = st_read(index.file) %>% st_transform(crs = st_crs(gdf_traces))
+# # ggplot() + geom_sf(data = Ant.outline, color = 'grey') + geom_sf(data = dem.index)
+# keep.idx = unique(unlist(st_intersects(gdf_traces, dem.index)))
+# mosaic.download = dem.index[keep.idx,] %>% mutate(fileurl = as.character(fileurl))
+# 
+# # Download files from REMA ftp server
+# for (file in 1:nrow(mosaic.download)) {
+#   tmp.file = tempfile()
+#   dir.name = basename(dirname(mosaic.download$fileurl[file]))
+#   
+#   # If not already downloaded, download tile and extract
+#   if (!dir.exists(file.path(REMA.dir, dir.name))) {
+#     download.file(mosaic.download$fileurl[file], tmp.file)
+#     untar(tmp.file, exdir = file.path(REMA.dir, dir.name))
+#   }
+#   unlink(tmp.file)
+# }
+```
+
+```{r}
+##----
+# ## Generate aspect and slope tiffs for any required REMA tiles, extract slope/aspect
+# ## values for all accum points, and add data to data tibbles
+# 
+# # Function to find which accum points are within a given REMA 8-meter mosaic tile 
+# # and extract elevation, slope, and aspect from the REMA raster data
+# get_topo_vals = function(tile, accum.pts, tile.dir) {
+#   
+#   # Logical to filter accum data to those members within the tile extent
+#   pts.log = st_intersects(accum.pts, tile, sparse = FALSE)[,1]
+#   accum.i = accum.pts %>% filter(pts.log)
+#   
+#   # Generate file paths to DEM, slope raster and aspect raster
+#   dem.path = file.path(tile.dir, as.character(tile$tile), 
+#                        paste(as.character(tile$tile), "_8m_dem.tif", sep = ""))
+#   slope.path = file.path(tile.dir, as.character(tile$tile), 
+#                          paste(as.character(tile$tile), "_8m_slope.tif", sep = ""))
+#   aspect.path = file.path(tile.dir, as.character(tile$tile), 
+#                           paste(as.character(tile$tile), "_8m_aspect.tif", sep = ""))
+#   
+#   # Check if slope/aspect rasters exist. If they don't, calculate them from DEM 
+#   # and save to REMA directory
+#   if (!file.exists(slope.path)) {
+#     tile.dem = raster(dem.path)
+#     tile.slope = terrain(tile.dem, opt='slope', unit='degrees')
+#     writeRaster(tile.slope, filename = slope.path, format = "GTiff")
+#     tile.aspect = terrain(tile.dem, opt='aspect', unit='degrees')
+#     writeRaster(tile.aspect, filename = aspect.path, format = "GTiff")
+#   }
+#   
+#   # Generate raster stack of DEM, slope, and aspect 
+#   # and extract raster values at accum points
+#   tile.stack = stack(list(dem.path, slope.path, aspect.path))
+#   stack.vals = extract(tile.stack, accum.i)
+#   
+#   # Get index values of accum data subset within the global accum dataset
+#   pts.idx = (1:length(pts.log))[pts.log]
+#   
+#   # Return index positions and raster stack values as list object
+#   return(list(pts.idx, stack.vals))
+# }
+```
+
+```{r}
+# # Add variables for REMA elevation, slope, and aspect
+# accum.PS = accum.PS %>% mutate(elev.REMA = NA, slope = NA, aspect = NA)
+# 
+# for (i in 1:nrow(mosaic.download)) {
+#   
+#   # Get current tile with coverage in dataset
+#   tile = mosaic.download[i,]
+#   
+#   # Calculate and extract elevation, slope, and aspect
+#   vals.list = get_topo_vals(tile, accum.PS, REMA.dir)
+#   topo.idx = vals.list[[1]]
+#   topo.vals = vals.list[[2]]
+#   
+#   # Assign topo values to accum tbl
+#   accum.PS$elev.REMA[topo.idx] = topo.vals[,1]
+#   accum.PS$slope[topo.idx] = topo.vals[,2]
+#   accum.PS$aspect[topo.idx] = topo.vals[,3]
+# }
+```
+
+```{r}
+# REMA.200m = "/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m/REMA_200m_dem_filled.tif"
+# elev = rast(REMA.200m)
+# crs(r) = st_crs(gdf_traces)$wkt
+# 
+# slope.200m = "/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m/REMA_200m_slope.tif"
+# slope = terrain(elev, v='slope', filename=slope.200m)
+# 
+# aspect.200m = "/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m/REMA_200m_aspect.tif"
+# slope = terrain(elev, v='aspect', filename=aspect.200m)
+
+REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m")
+dem = rast(file.path(REMA.dir, "REMA_200m_dem.tif"))
+crs(dem) = st_crs(gdf_traces)$wkt
+
+slp = rast(file.path(REMA.dir, "REMA_200m_slope.tif"))
+crs(slp) = crs(dem)
+
+aspct = rast(file.path(REMA.dir, "REMA_200m_aspect.tif"))
+crs(aspct) = crs(dem)
+
+topo.stk = c(dem, slp, aspct)
+
+topo.pts = extract(topo.stk, vect(gdf_traces$geometry))
+gdf_traces = gdf_traces %>% mutate(dem=topo.pts$REMA_200m_dem, 
+                               slope=topo.pts$slope, 
+                               aspect=topo.pts$aspect)
+
+```
+
+```{r}
+RACMO.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data", 
+                      "/RACMO/2.3p2_yearly_ANT27_1979_2016/interim")
+files = list.files(path = RACMO.dir, full.names = TRUE, 
+                   pattern = "\\.tif$")
+
+r.smb = rast(files[1])
+names(r.smb) = 1979:2016
+# smb.pts = extract(r.smb, vect(gdf_traces$geometry))
+r.u10m = rast(files[2])
+names(r.u10m) = 1979:2016
+# u10m.pts = extract(r.u10m, vect(gdf_traces$geometry))
+r.v10m = rast(files[3])
+names(r.v10m) = 1979:2016
+# v10m.pts = extract(r.v10m, vect(gdf_traces$geometry))
+
+racmo.stk = c(mean(r.smb), mean(r.u10m), mean(r.v10m))
+names(racmo.stk) = c("smb", "u10m", "v10m")
+
+racmo.pts = extract(racmo.stk, vect(gdf_traces$geometry))
+gdf_traces = gdf_traces %>% mutate(smb.racmo=racmo.pts$smb, 
+                               u10m=racmo.pts$u10m, 
+                               v10m=racmo.pts$v10m)
+
+gdf_traces = gdf_traces %>% mutate(S_x = abs(slope)*cos(aspect*pi/180), 
+                                   S_y = abs(slope)*sin(aspect*pi/180)) %>% 
+  mutate(MSWD = S_x*u10m + S_y*v10m)
+```
+
+
+## Data exploration
+
+```{r}
+# tmap_mode("view")
+# tm_shape(gdf_traces["accum"] %>% filter(accum < 750)) + 
+#   tm_dots(col="accum", palette="viridis", style="cont")
+# 
+# tm_shape(gdf_traces %>% filter(accum < 750) %>% select(std)) + 
+#   tm_dots(col="std", palette="plasma", style="cont")
+
+ggplot(gdf_traces) + geom_sf(aes(color=accum)) + 
+  scale_color_viridis_c(limits=c(200,500))
+# ggplot(gdf_traces) + geom_sf(aes(color=std)) + 
+#   scale_color_viridis_c(option="plasma", limits=c(0, 750))
+ggplot(gdf_traces) + geom_sf(aes(color=(100*std/accum))) + 
+  scale_color_viridis_c(option="plasma", limits=c(0,50))
+ggplot(gdf_traces) + geom_sf(aes(color=smb.racmo-accum)) + 
+  scale_color_gradientn(colours = cet_pal(5, name = "d1a"), limits=c(-250,250))
+
+ggplot(gdf_traces) + geom_sf(aes(color=dem)) + 
+  scale_color_viridis_c(limits=c(750,2000), option="magma") + 
+  labs(color = "% error")
+ggplot(gdf_traces) + geom_sf(aes(color=elev)) + 
+  scale_color_viridis_c(limits=c(1250,2500), option="magma")
+ggplot(gdf_traces) + geom_sf(aes(color=slope)) + lims(color=c(0,1))
+ggplot(gdf_traces) + geom_sf(aes(color=aspect)) + 
+  scale_color_gradientn(colours = cet_pal(5, name = "c2s"))
+ggplot(gdf_traces) + geom_sf(aes(color=MSWD)) + scale_color_viridis_c()
+```
+
+```{r}
+ggplot(gdf_traces, aes(x=accum)) + geom_histogram()
+ggplot(gdf_traces, aes(x=std)) + geom_histogram()
+ggplot(gdf_traces, aes(x=accum, y=std)) + geom_point()
+ggplot(gdf_traces, aes(sample=accum)) + stat_qq() + stat_qq_line()
+# vals = log1p(st_drop_geometry(gdf_traces["accum"]))
+# ggplot(vals, aes(x=accum)) + geom_histogram()
+# ggplot(vals, aes(sample=accum)) + stat_qq() + stat_qq_line()
+
+ggplot(gdf_traces, aes(x=elev, y=dem)) + geom_point()
+ggplot(gdf_traces) + geom_density(aes(x=elev), fill='red', alpha=0.5) + 
+  geom_density(aes(x=dem), fill='blue', alpha=0.5)
+ggplot(gdf_traces) + geom_sf(aes(color=(elev-dem))) + 
+  scale_color_gradientn(colours = cet_pal(5, name = "l13"))
+
+ggplot(gdf_traces) + geom_point(aes(x=smb.racmo, y=accum)) + 
+  geom_abline(slope = 1, intercept = 0)
+ggplot(gdf_traces) + geom_point(aes(x=dem, y=accum))
+ggplot(gdf_traces) + geom_point(aes(x=slope, y=accum))
+ggplot(gdf_traces) + geom_point(aes(x=aspect, y=accum))
+
+# pairs(gdf_traces %>% select(-trace_ID, -collect_time) %>% st_drop_geometry())
+# ggplot(gdf_traces %>% select(-trace_ID, -collect_time) %>% st_drop_geometry(), 
+       # aes(x=id, y=value)) + geom_point() + facet_grid(.~variable)
+
+```
+
+## Scaling and centering data
+
+```{r}
+# Log transform positive variables
+# data = gdf_traces %>% mutate(accum = log(accum), std = log(std), elev = log(elev),
+#                              dem = log(dem), smb.racmo = log(smb.racmo)) %>%
+#   select(geometry, accum, std, elev, dem, MSWD, smb.racmo)
+
+dat_train = gdf_traces %>% slice_sample(prop = 0.10) %>% arrange(trace_ID)
+dat_test = gdf_traces %>% filter(!trace_ID %in% dat_train$trace_ID)
+```
+
+
+## INLA modeling
+
+```{r}
+
+mesh = inla.mesh.2d(loc = st_coordinates(dat_train), 
+                    # crs = st_crs(dat_train)$Wkt, 
+                    max.edge = c(25000, 100000), cutoff = 1000)
+plot(mesh)
+points(st_coordinates(dat_train), col = "red")
+# Mesh = inla.mesh.2d(st_coordinates(tmp),
+#                       max.edge = c(900, 2000),
+#                       cutoff = 190)
+# 
+# plot(Mesh,asp = 1, main = "")
+# points(st_coordinates(tmp), col = 'red', pch = 16, cex = 0.1)
+```
+
+```{r}
+
+A_matrix = inla.spde.make.A(mesh, loc = st_coordinates(dat_train))
+spde.0 = inla.spde2.matern(mesh = mesh, alpha = 2)
+
+# Define penalized-complexity (PC) prior
+pcprec <- list(prior = 'pcprec', param = c(1, 0.01))
+# Define covariance function
+spde_pc <- inla.spde2.pcmatern(mesh = mesh,
+  prior.range = c(0.05, 0.01), # P(practic.range < 0.05) = 0.01
+  prior.sigma = c(1, 0.01)) # P(sigma > 1) = 0.01
+
+# Make data stack
+stk.dat <- inla.stack(
+  data = list(y = dat_train$accum), 
+  A = list(A_matrix,1),
+  effects = list(list(s = 1:spde.0$n.spde), 
+                 tibble(Intercept = 1, 
+                        gElev = inla.group(dat_train$dem), 
+                        gMSWD = inla.group(dat_train$MSWD), 
+                        elev = dat_train$dem, 
+                        mswd = dat_train$MSWD)), 
+  tag = 'dat_train') 
+
+f.0 = y ~ 0 + Intercept + 
+  f(spatial.field, model = spde.0)
+f.fixed = y ~ 0 + Intercept + elev + mswd + 
+  f(s, model = spde.0)
+f.rw1 = y ~ 0 + Intercept + 
+  f(gElev, model = 'rw1', scale.model = TRUE, 
+    hyper = list(prec = pcprec)) + 
+  f(gMSWD, model = 'rw1', scale.model = TRUE, 
+    hyper = list(prec = pcprec)) + 
+  f(s, model = spde_pc)
+```
+
+```{r}
+# # Now we can fit the proper model using the inla() function
+# Mod.out_0 = inla(f.0, family = 'Gamma', 
+#                 data = list( y = dat_train$accum,         # response variable
+#                             Intercept = rep(1,spde.0$n.spde),   # intercept (manually specified)
+#                             spatial.field = 1:spde.0$n.spde),  # the spatial random effect (specified with the matern autocorrelation structure from spde)   
+#                 control.predictor = list( A = A_matrix,
+#                                           link = 1, 
+#                                           compute = T),       # this tells the model to compute the posterior marginals for the linear predictor
+#                 control.compute = list(cpo = T))
+
+```
+
+```{r}
+mod.fixed = inla(f.fixed, family = 'Gamma', 
+                 control.compute = list(cpo = TRUE), 
+                 data = inla.stack.data(stk.dat), 
+                 control.predictor = list(A = inla.stack.A(stk.dat), link = 1))
+```
+
+```{r}
+# mod.rw1 = inla(f.rw1, family = 'Gamma', 
+#                control.compute = list(cpo = TRUE), 
+#                  data = inla.stack.data(stk.dat), 
+#                  control.predictor = list(A = inla.stack.A(stk.dat), link = 1))
+```
+
+```{r}
+slcpo <- function(m, na.rm = TRUE) {
+  - sum(log(m$cpo$cpo), na.rm = na.rm)
+}
+
+# c(mod.0 = slcpo(Mod.out_0), mod.fixed = slcpo(mod.fixed),
+#   mod.rw1 = slcpo(mod.rw1))
+
+mod.best = mod.fixed
+```
+
+
+```{r}
+spat.tbl = tibble(E = mesh$loc[,1], N = mesh$loc[,2], 
+                  spat.mu = mod.best$summary.random$s$mean, 
+                   spat.sd = mod.best$summary.random$s$sd) %>% 
+  st_as_sf(coords=c("E", "N"), crs=st_crs(dat_train))
+
+ggplot(spat.tbl) + geom_sf(aes(color=spat.mu)) + 
+  scale_color_viridis_c()
+ggplot(spat.tbl) + geom_sf(aes(color=spat.sd)) + 
+  scale_color_viridis_c(option='plasma')
+```
+
+
+```{r}
+pred.bbox = st_bbox(gdf_traces)
+
+stepsize = 1000
+buffer = 30*stepsize
+E.range = round(c(pred.bbox[1]-buffer, pred.bbox[3]+buffer))
+N.range = round(c(pred.bbox[2]-buffer, pred.bbox[4]+buffer))
+
+nxy <- round(c(diff(E.range), diff(N.range)) / stepsize) # Calculate the number of cells in the x and y ranges
+
+# Project the spatial field on the mesh vertices using the inla.mesh.projector() function
+projgrid <- inla.mesh.projector(mesh,
+                                xlim = E.range,
+                                ylim = N.range,
+                                dims = nxy)
+
+```
+
+```{r}
+
+# xmean = inla.mesh.project(projgrid,
+#                            mod.best$summary.random$s$mean)
+# xsd = inla.mesh.project(projgrid,
+#                          mod.best$summary.random$s$sd)
+# 
+# r1 <- r2 <- rast(xmin=E.range[1], xmax=E.range[2]-stepsize, 
+#               ymin=N.range[1], ymax=N.range[2], 
+#               crs=st_crs(dat_train)$proj4string, 
+#               resolution=stepsize)
+# values(r1) = c(xmean)
+# names(r1) = 'spat.mu'
+# values(r2) = c(xsd)
+# names(r2) = 'spat.sd'
+# s.pred = c(flip(r1), flip(r2))
+```
+
+```{r}
+
+# Find index of grid points within the country border
+grid.pts = tibble(x = projgrid$lattice$loc[,1],
+                  y = projgrid$lattice$loc[,2],
+                  idx = 1:nrow(projgrid$lattice$loc))
+grid.sf = st_as_sf(grid.pts, coords=c('x','y'))
+# tmp = st_join(border.sf, grid.sf, join = st_intersects)
+# grid.idx = tmp$idx
+
+# Extract topo covariates from rasters for each grid point
+topo.pts = extract(topo.stk, vect(grid.sf$geometry))
+grid.sf = grid.sf %>% mutate(dem=topo.pts$REMA_200m_dem, 
+                               slope=topo.pts$slope, 
+                               aspect=topo.pts$aspect)
+
+# Extract clim covariates from rasters for each grid point
+racmo.pts = extract(racmo.stk, vect(grid.sf$geometry))
+grid.sf = grid.sf %>% mutate(smb.racmo=racmo.pts$smb, 
+                               u10m=racmo.pts$u10m, 
+                               v10m=racmo.pts$v10m)
+grid.sf = grid.sf %>% mutate(S_x = abs(slope)*cos(aspect*pi/180), 
+                                   S_y = abs(slope)*sin(aspect*pi/180)) %>% 
+  mutate(MSWD = S_x*u10m + S_y*v10m)
+# grid.sf = drop_na(grid.sf) %>% st_as_sf(crs = st_crs(data))
+
+```
+
+```{r}
+
+# Define projector matrix for predictions
+A.pred = projgrid$proj$A
+
+# Extract prediction coordinates
+pred.coords = st_coordinates(grid.sf)
+
+# Generate prediction data stack and join to estimation stack
+stk.pred <- inla.stack(
+  data = list(y = NA),
+  A = list(A.pred, 1), 
+  effects = list(list(s = 1:spde.0$n.spde), 
+                 tibble(Intercept = 1, 
+                        gElev = inla.group(grid.sf$dem), 
+                        gMSWD = inla.group(grid.sf$MSWD), 
+                        elev = grid.sf$dem, 
+                        mswd = grid.sf$MSWD)),
+  tag = 'pred') 
+stk.all <- inla.stack(stk.dat, stk.pred)
+```
+
+```{r}
+mod.preds <- inla(f.fixed, family = 'Gamma', 
+                  data = inla.stack.data(stk.all), 
+                  control.predictor = list(A = inla.stack.A(stk.all),
+                                           compute = TRUE, link = 1), 
+                  quantiles = NULL, 
+                  control.inla = list(strategy = 'adaptive'), 
+                  # control.results = list(return.marginals.random = FALSE,
+                  #                        return.marginals.predictor = FALSE), 
+                  control.mode = list(theta = mod.best$mode$theta,
+                                      restart = FALSE))
+```
+
+```{r}
+# Get inla grid indices where data exists
+idx.pred <- inla.stack.index(stk.all, 'pred')$data
+
+# Preallocate matrices for mean and sd predictions
+# (using the same grid as generated for spatial rasters above)
+sd.pred <- mu.pred <- matrix(NA, nxy[1], nxy[2])
+mu.pred = mod.preds$summary.fitted.values$mean[idx.pred]
+sd.pred = mod.preds$summary.fitted.values$sd[idx.pred]
+
+bad.idx = mu.pred > 1500
+# mu.pred[bad.idx] = NA
+# sd.pred[bad.idx] = NA
+
+spat.mu = inla.mesh.project(projgrid,
+                           mod.preds$summary.random$s$mean)
+spat.sd = inla.mesh.project(projgrid,
+                         mod.preds$summary.random$s$sd)
+```
+
+```{r}
+
+r1 <- r2 <- r3 <- r4 <- rast(xmin=round(E.range[1]), xmax=round(E.range[2]-stepsize), 
+                 ymin=round(N.range[1]), ymax=round(N.range[2]), 
+                 resolution=stepsize)
+values(r1) = c(mu.pred)
+names(r1) = 'pred.mu'
+values(r2) = c(sd.pred)
+names(r2) = 'pred.sd'
+values(r3) = c(spat.mu)
+names(r3) = 'spat.mu'
+values(r4) = c(spat.sd)
+names(r4) = 'spat.sd'
+
+rast.pred = c(flip(r1), flip(r2), flip(r3), flip(r4))
+crs(rast.pred) = st_crs(gdf_traces)$wkt
+
+# Extract accum estimates at locations of test data
+test.pts = extract(rast.pred, vect(dat_test$geometry))
+dat_test = dat_test %>% mutate(pred.mu=test.pts$pred.mu, 
+                               pre.sd=test.pts$pred.sd)
+
+racmo.stk = racmo.stk %>% crop(rast.pred)
+topo.stk = topo.stk %>% crop(rast.pred)
+# plot(rast.pred)
+```
+
+```{r}
+
+writeRaster(rast.pred, here('data/rast-pred_20211025.tif'), overwrite = TRUE, filetype = "GTIFF")
+writeRaster(racmo.stk, here('data/racmo_20211025.tif'), overwrite = TRUE, filetype = "GTIFF")
+writeRaster(topo.stk, here('data/topo_20211025.tif'), overwrite = TRUE, filetype = "GTIFF")
+save(dat_test, dat_train, gdf_traces, mod.best, mod.preds, grid.sf, file = here('data/mod.fitted_20211025.RData'))
+```
+
+```{r}
+rast.pred = rast(here('data/rast-pred_20211025.tif'))
+racmo.stk = rast(here('data/racmo_20211025.tif'))
+topo.stk = rast(here('data/topo_20211025.tif'))
+load(here('data/mod.fitted_20211025.RData'))
+```
+
+```{r}
+plot(rast.pred)
+
+ggplot(dat_test) + geom_abline(slope = 1, intercept = 0) + 
+  geom_point(aes(x=accum, y=pred.mu), color='red') + 
+  geom_point(aes(x=accum, y=smb.racmo), color='blue') + 
+  xlab('PAIPR accum') + ylab('Modeled accum')
+```
+
+```{r}
+ggplot(gdf_traces) + geom_sf(aes(color=smb.racmo)) + scale_color_viridis_c(limits = c(150, 650))
+ggplot(gdf_traces) + geom_sf(aes(color=accum)) + scale_color_viridis_c(limits = c(150, 650))
+```
+

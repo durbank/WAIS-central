@@ -1,0 +1,501 @@
+---
+title: "WAIS analysis using INLA"
+output: html_notebook
+---
+
+This is a working version of the general workflow notebook for processing WAIS radar results using INLA.
+This includes the general process from raw data import to final processing.
+This also includes some instructions for various pre-processing in Python.
+
+## MISC USEFUL LINKS
+
+A few other useful tutorials and such regarding R-INLA and INLA in general:
+
+- [Official R-INLA Website](https://www.r-inla.org/)
+- [Spatial Modeling with R-INLA](https://ourcodingclub.github.io/tutorials/spatial-modelling-inla/): A nice walkthrough tutorial of spatial modeling and geostatistics using r-inla
+- [Book: Spatiotemporal Bayesian Models using INLA](https://sites.google.com/a/r-inla.org/stbook/home)
+- [A gentle INLA tutorial](https://www.precision-analytics.ca/articles/a-gentle-inla-tutorial/)
+- [Intro in INLA for geospatial modeling](https://punama.github.io/BDI_INLA/)
+- [Digital Book: Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/index.html)
+- [Brief intro/tutorial on INLA](https://www.flutterbys.com.au/stats/tut/tut12.9.html)
+- [Great mini tutorials using R-INLA](https://haakonbakkagit.github.io/organisedtopics.html)
+- [Book: Geospatial Health Data: Modeling and Visualization with R-INLA and Shiny](https://www.paulamoraga.com/book-geospatial/): Walkthroughs using health data, but the explanations make more intuitive sense to me. Section 8 is particularly useful for my work (sadly Section 10 appears to be blank)
+
+## Python preprocessing
+
+To get data in the proper format prior to these analyses, some Python processing is required.
+The necessary data are produced and saved to disk by running `preprocessing.py` in the `src` directory.
+
+## INLA modeling
+
+The remainder of this notebook shows the workflow for processing PAIPR WAIS data using rINLA.
+I first detail some of the theory and principles behind this, and how specifically I plan to utilize them in this research specifically.
+
+### Background
+
+The accumulation data modeled in this study represents a continuous distribution of a random variable over two continuous spatial dimensions and indexed over an additional discrete temporal dimension.
+We model accumulation as a gamma distribution to ensure a zero-bounded function with increased variance at higher expected values.
+$$\mathbf{Y} \sim Gamma(a,b)$$
+Rather than using the shape and rate parameters $a$ and $b$, we can express this gamma distribution in terms of the expected y value $E(y_i) = a_i/b_i = \mu_i$ and its associated variance (as expressed using the precision parameter $\phi$) $Var(y_i) = a_i/b_i^2 = \mu_i^2/\phi$.
+This $\phi$ is the same precision parameter as output from `inla` (there is also a scale parameter $s$ that has a default of 1 where $Var(y_i) = 1/\tau$ and $\tau = (s\phi)/\mu_i^2$).
+With rearranging and substituting, we have $a_i = \phi$ and $b_i = \phi/\mu_i$ and we can therefore express the distribution in accumulation observations in terms of $\phi$ and $\mu_i$.
+$$y_i \sim Gamma(\mu_i, \phi)$$
+
+For each observation $y_i \in \mathbf{Y}$, we can construct a linear predictor $\eta_i$ for the expectation value $\mu_i$.
+As we assume a gamma-distribution for accumulation, we associate $\eta_i$ and $\mu_i$ via the log link function.
+$$\log(\mu_i) = \eta_i$$ 
+We can further model $\eta_i$ as a generalized linear model consisting of fixed effect variables $\mathbf{X}$ and smoothed random latent effects (in this case we are modeling a spatial random effect $u_i$ and a temporal random effect $\omega_i$).
+$$
+\eta_{i} = \alpha +  \sum^M_{m=1} \beta_m x_{mi} + u_i + \omega_{i}
+$$
+
+These latent random effects $u_i$ and $\omega_i$ are indexed by a set of parameters $\theta_s$ and $\theta_t$ that account for the spatial and temporal correlation in the data.
+We can model these correlation structures (as defined by the parameters $\pmb{\theta}$) as latent stationary Gaussian Fields, using a function of some hyperparameters $\psi$ and an associated prior distribution $p(\psi)$.
+This is equivalent to assuming that $\pmb{\theta}$ is associated with some multivariate Normal distribution with mean $\mu = (\mu_1,...,\mu_n)'$ and covariance structure $\Sigma$, where $\Sigma_{ij} = Cov(\theta_i, \theta_j)$.
+
+$$
+\theta \sim \mathcal{N}(\mu, \Sigma)
+$$
+
+If we assume adherence to Markovian properties, our precision matrix $Q = \Sigma^{-1}$ is sparse, with the non-zero components of $Q$ completely given by the neighborhood structure ($N$) of our process, i.e. $Q_{ij} \neq 0 \iff j \in \{i,N(i)\}$.
+In this assumption, we specify a Gaussian-Markov Random Field for both our spatial and temporal structures, permitting vast improvements in computational efficiency.
+We also model the spatial and temporal random effects independently, which again greatly improves computation time, but will fail to capture any co-dependencies between these effects.
+
+The spatial GMRF $u_i$ is derived from a stochastic partial differential equation...
+
+We model the temporal random effect $\omega_i$ as a first-order autoregressive model^[I will eventually want to update this to an AR(2) process due to the known temporal autocorrelation in our data] (representing how the spatial field evolves in time) where
+$$\omega_t = \rho \omega_{t-1}$$
+
+
+
+Our objective, therefore, is to find the joint posterior distribution
+$$P(\phi, \alpha, \pmb{\beta}, \rho, \mid \mathbf{Y})$$
+
+### INLA installation
+
+The latest version of R (`4.1.1` as of this writing) states it is currently incompatible with R-INLA.
+This seems to be some sort of bug (perhaps limited to RStudio?) as it is possible to do this.
+It does require installing from a local source instead of following the [standard install instructions](https://www.r-inla.org/download-install) for R-INLA.
+Binaries for R-INLA can be found at [this ftp](http://inla.r-inla-download.org/R/testing/src/contrib/).
+Then simply follow [these instructions](https://riptutorial.com/r/example/5556/install-package-from-local-source) to do install from local source in RStudio.
+This will also require installing some of the dependencies and misc. required R packages as well (e.g. `sp`, `foreach`, etc.).
+
+### Imports
+
+```{r}
+library(here)
+library(tidyverse)
+library(cetcolor)
+library(sf)
+library(terra)
+library(INLA)
+library(INLAutils)
+library(spdep)
+```
+
+### Data loading and pre-processing
+
+```{r}
+data_long = read_csv(here('data/paipr-long.csv')) %>% select(-...1)
+gdf_traces = st_read(here('data/traces.geojson')) %>% as_tibble() %>% st_as_sf()
+
+# Remove points in far northern extent
+accum_bnds = st_coordinates(gdf_traces)
+gdf_traces = gdf_traces %>% st_crop(xmin=-1.5e6, xmax=max(accum_bnds[,1]),
+                                    ymin=min(accum_bnds[,2]), ymax=max(accum_bnds[,2]))
+
+# Remove unrealistically high elevations
+trace_drop = gdf_traces %>% filter(elev > 3000)
+
+# Filter out overly large accum sites
+trace_drop = trace_drop %>% filter(accum > 1000) %>% select(trace_ID)
+
+# Add East/North coordinates and drop large accum sites
+pts_tmp = st_coordinates(gdf_traces)
+coord_df = tibble(trace_ID = gdf_traces$trace_ID, East = pts_tmp[,1], North = pts_tmp[,2])
+data = data_long %>% left_join(coord_df) %>% filter(!trace_ID %in% trace_drop$trace_ID)
+```
+
+For testing/development purposes, only use a small sample of total
+```{r}
+# xy.bnds = st_bbox(gdf_traces)
+# xy.range = list(x=(xy.bnds$xmax - xy.bnds$xmin), y=(xy.bnds$ymax - xy.bnds$ymin))
+# gdf_traces = gdf_traces %>% st_crop(xmin=as.numeric(xy.bnds$xmin+0.25*xy.range$x), 
+#                                     xmax=as.numeric(xy.bnds$xmin+0.50*xy.range$x),
+#                                     ymin=as.numeric(xy.bnds$ymin), 
+#                                     ymax=as.numeric(xy.bnds$ymin+0.25*xy.range$y))
+
+set.seed(777)
+gdf_traces = gdf_traces %>% sample_frac(0.01)
+data = data %>% filter(trace_ID %in% gdf_traces$trace_ID) %>% 
+  filter(Year >= 1980) %>% filter(Year <= 2000) %>% arrange(trace_ID, Year)
+```
+
+```{r}
+# Select variables of interest
+dat = data %>% select(trace_ID, East, North, Year, accum, std, elev)
+
+# Center covariates
+yr.min = min(dat$Year)-1
+dat = dat %>% mutate(Year = Year-yr.min, elev = elev-mean(elev))
+
+# Split into training and testing sets
+dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
+dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
+dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
+```
+
+### INLA  modeling
+
+We first create the mesh used for defining the neighborhoods (this is important for generating the sparse precision matrix $Q$, enabling our GMRF approximation).
+```{r}
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
+                    max.edge = c(20000, 50000), cutoff = 1000)
+plot(mesh)
+points(dat.train %>% select(East, North), col = "red")
+# mesh = inla.mesh.2d(loc = st_coordinates(gdf_traces), 
+#                     max.edge = c(20000, 50000), cutoff = 1000)
+# plot(mesh)
+# points(st_coordinates(gdf_traces), col = "red")
+```
+
+<!-- ## Form 1 -->
+
+<!-- This follows examples as shown in Section 7.1 of [Advanced Spatial Modeling with Stochastic Partial Differential Equations Using R and INLA](https://becarioprecario.bitbucket.io/spde-gitbook/ch-spacetime.html#discrete-time-domain). -->
+
+<!-- ### -->
+
+<!-- We then define our SPDE object and create the identifier matrix $A$. -->
+<!-- ```{r} -->
+<!-- spde = inla.spde2.pcmatern(mesh = mesh,  -->
+<!--   prior.range = c(5000, 0.01), # P(range < 5 km) = 0.01 -->
+<!--   prior.sigma = c(250, 0.1)) # P(sigma > 250 mm w.e.) = 0.10 -->
+<!-- # spde = inla.spde2.matern(mesh=mesh, alpha=2) -->
+
+<!-- iset = inla.spde.make.index('i', n.spde = spde$n.spde, -->
+<!--   n.group = max(dat$Year)) -->
+<!-- A = inla.spde.make.A(mesh = mesh, -->
+<!--   loc = cbind(dat$East, dat$North), group = dat$Year)  -->
+<!-- # A_matrix = inla.spde.make.A(mesh, loc=st_coordinates(gdf_traces)) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- dat.stack = inla.stack( -->
+<!--   data = list(y = dat$accum),  -->
+<!--   A = list(A, 1),  -->
+<!--   effects = list(iset, data.frame(Intercept = 0, elev = dat$elev)), -->
+<!--   tag = 'dat')  -->
+<!-- ``` -->
+
+<!-- I also define a PC-prior for the autoregressive temporal autocorrelation. -->
+<!-- In particular, I assume that $P(corr > 0) = 0.9$, indicating a high degree of confidence that some temporal autocorrelation exists in our data. -->
+<!-- ```{r} -->
+<!-- # Prior on autoregressive rho parameter -->
+<!-- h.spec <- list(rho = list(prior = 'pc.cor1', param = c(0, 0.9))) -->
+
+<!-- # Prior on fixed effects intercept -->
+<!-- # prior.fixed <- list(mean.intercept = , prec.intercept = ) -->
+
+<!-- # Model formula -->
+<!-- formula = y ~ 0 + Intercept + elev + f(i, model = spde, group = i.group,  -->
+<!--   control.group = list(model = 'ar1', hyper = h.spec)) -->
+
+<!-- # PC prior on the autoregressive param -->
+<!-- prec.prior <- list(prior = 'pc.prec', param = c(50, 0.9)) -->
+
+<!-- # Model fitting -->
+<!-- system.time( -->
+<!--   results <- inla(formula,  -->
+<!--                family = 'Gamma', -->
+<!--                data = inla.stack.data(dat.stack),  -->
+<!--                control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack)),  -->
+<!--                # control.fixed = prior.fixed,  -->
+<!--                control.family = list(hyper = list(prec = prec.prior)),  -->
+<!--                control.compute = list(dic = TRUE)) -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ## Form 2 -->
+
+<!-- This appears to be the same end result as in Form 1, but a slightly different implementation as followed by Section 8.6.2 in [Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/ch-temporal.html#separable-models). -->
+
+<!-- ### -->
+
+<!-- We then define our SPDE object and create the identifier matrix $A$. -->
+<!-- ```{r} -->
+<!-- spde = inla.spde2.pcmatern(mesh = mesh,  -->
+<!--   prior.range = c(5000, 0.01), # P(range < 5 km) = 0.01 -->
+<!--   prior.sigma = c(250, 0.1)) # P(sigma > 250 mm w.e.) = 0.10 -->
+<!-- # spde = inla.spde2.matern(mesh=mesh, alpha=2) -->
+
+<!-- iset = inla.spde.make.index('i', n.spde = spde$n.spde, -->
+<!--   n.group = max(dat$Year)) -->
+<!-- A = inla.spde.make.A(mesh = mesh, -->
+<!--   loc = cbind(dat$East, dat$North), group = dat$Year)  -->
+<!-- # A_matrix = inla.spde.make.A(mesh, loc=st_coordinates(gdf_traces)) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- dat.stack = inla.stack( -->
+<!--   data = list(y = dat$accum),  -->
+<!--   A = list(A, 1),  -->
+<!--   effects = list(iset, data.frame(Intercept = 0, elev = dat$elev)), -->
+<!--   tag = 'dat')  -->
+<!-- ``` -->
+
+<!-- I also define a PC-prior for the autoregressive temporal autocorrelation. -->
+<!-- In particular, I assume that $P(corr > 0) = 0.9$, indicating a high degree of confidence that some temporal autocorrelation exists in our data. -->
+<!-- ```{r} -->
+<!-- # Prior on autoregressive rho parameter -->
+<!-- h.spec <- list(rho = list(prior = 'pc.cor1', param = c(0, 0.9))) -->
+
+<!-- # Prior on fixed effects intercept -->
+<!-- # prior.fixed <- list(mean.intercept = , prec.intercept = ) -->
+
+<!-- # Model formula -->
+<!-- formula = y ~ 0 + Intercept + elev + f(i, model = spde, group = i.group,  -->
+<!--   control.group = list(model = 'ar1', hyper = h.spec)) -->
+
+<!-- # PC prior on the autoregressive param -->
+<!-- prec.prior <- list(prior = 'pc.prec', param = c(50, 0.9)) -->
+
+<!-- # Model fitting -->
+<!-- system.time( -->
+<!--   results <- inla(formula,  -->
+<!--                family = 'Gamma', -->
+<!--                data = inla.stack.data(dat.stack),  -->
+<!--                control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack)),  -->
+<!--                # control.fixed = prior.fixed,  -->
+<!--                control.family = list(hyper = list(prec = prec.prior)),  -->
+<!--                control.compute = list(dic = TRUE)) -->
+<!-- ) -->
+<!-- ``` -->
+
+
+
+## Form 3
+
+This follows examples from Section 8.6.1 in [Bayesian inference with INLA](https://becarioprecario.bitbucket.io/inla-gitbook/ch-temporal.html#separable-models), which details the spatio-temporal component as a separable model more explicitly (two random effects in the formula, one for the spatial model and one for the group-indexed time model).
+
+**THIS IS SO MUCH FASTER!!!**
+
+###
+
+We then define our SPDE object and create the identifier matrix $A$.
+```{r}
+spde = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(10000, 0.01), # P(range < 10 km) = 0.01
+  prior.sigma = c(250, 0.10)) # P(sigma > 250 mm w.e.) = 0.10
+# spde = inla.spde2.matern(mesh=mesh, alpha=2)
+
+# iset = inla.spde.make.index('i', n.spde = spde$n.spde,
+#   n.group = max(dat$Year))
+
+# Create projector matrix for SPDE mesh
+A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
+# A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat$East, dat$North))
+
+# Assign index vectors for SPDE model
+spat.idx = inla.spde.make.index(name = "spat.field", n.spde = spde$n.spde)
+```
+
+
+```{r}
+# Make data stack
+dat.stack <- inla.stack(
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, 1, A.spat),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev), 
+                 list(time = dat.train$Year), 
+                 spat.idx),
+  tag = 'dat') 
+```
+
+I also define a PC-prior for the autoregressive temporal autocorrelation.
+In particular, I assume that $P(corr > 0) = 0.9$, indicating a high degree of confidence that some temporal autocorrelation exists in our data.
+```{r}
+## Define other priors (spatial field priors defined earlier)
+
+# Prior on autoregressive rho parameter
+time.spec <- list(rho = list(prior = 'pc.cor1', param = c(0, 0.9)))
+
+# Prior on fixed effects intercept
+prior.fixed <- list()
+
+# Prior on precision parameter for Gamma observations
+prec.prior <- list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+
+## PC prior implementations
+
+# # Prior on autoregressive rho parameter
+# time.spec <- list(rho = list(prior = 'pc.cor1', param = c(0, 0.9)))
+# 
+# # Prior on fixed effects intercept
+# prior.fixed <- list()
+# 
+# # Prior on precision parameter for Gamma observations
+# prec.prior <- list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+
+
+
+# Model formula
+formula = y ~ -1 + Intercept + elev + 
+  f(time, model = 'ar1', hyper = time.spec) + 
+  f(spat.field, model = spde)
+# formula = y ~ elev + f(spat.field, model = spde) + f(time.field, model = 'ar1', hyper = h.spec)
+```
+
+```{r}
+# Model fitting
+system.time(
+  results <- inla(formula, 
+                  data = inla.stack.data(dat.stack), 
+                  family = 'Gamma',
+                  control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1), 
+                  # control.fixed = prior.fixed, 
+                  control.family = list(hyper = list(prec = prec.prior)), 
+                  control.compute = list(dic = TRUE))
+)
+```
+
+## Continuation
+
+```{r}
+# summary(results)
+round(results$summary.fixed, 4)
+round(results$summary.hyperpar, 3)
+results$dic$dic
+```
+
+
+Extract fitted values from `inla` model.
+```{r}
+dat.idx = inla.stack.index(dat.stack, 'dat')$data
+G.params = tibble(mu = results$summary.fitted.values$mean[dat.idx], mu.sd = results$summary.fitted.values$sd[dat.idx])
+
+res.tbl = tibble(trace_ID = dat.train$trace_ID, East = dat.train$East, North = dat.train$North, 
+              Year = dat.train$Year, elev = dat.train$elev, accum = dat.train$accum, y.hat = G.params$mu) %>% 
+  mutate(y.res = y.hat-accum) %>% 
+  st_as_sf(coords = c("East", "North"), crs=st_crs(gdf_traces))
+
+```
+
+## Test data results
+
+```{r}
+# Create projector matrix for test data
+A.test = inla.spde.make.A(mesh = mesh, loc = cbind(dat.test$East, dat.test$North))
+
+# Create test data stack and join to data stack
+test.stack <- inla.stack(
+  data = list(y = NA), 
+  A = list(1, 1, 1, A.test),
+  effects = list(list(Intercept = rep(1, nrow(dat.test))), 
+                 tibble(elev = dat.test$elev), 
+                 list(time = dat.test$Year), 
+                 spat.idx),
+  tag = 'test')
+val.stack <- inla.stack(dat.stack, test.stack)
+```
+
+```{r}
+# Model fitting to test data
+system.time(
+  mod.test <- inla(formula, 
+                  data = inla.stack.data(val.stack), 
+                  family = 'Gamma',
+                  quantiles = NULL, 
+                  control.predictor = list(compute = TRUE, A = inla.stack.A(val.stack), link = 1), 
+                  control.family = list(hyper = list(prec = prec.prior)), 
+                  control.inla = list(strategy = 'adaptive'), 
+                  control.mode = list(theta = results$mode$theta, restart = FALSE))
+)
+```
+
+
+Below is a function that, given an input of mean estimates, sd on mean estimates, precision parameter for Gamma observations, and sd on precision parameter, returns $n$ samples from the posterior predictive distribution for the given inputs.
+```{r}
+pp.dist = function(data, prec, prec.sd, n=5000, return_sample=FALSE) {
+  if (return_sample==TRUE) {
+    ppd = matrix(data=NA, nrow=nrow(data), ncol=n)
+  } else {
+    ppd = tibble(mu=rep(0,nrow(data)), map=rep(0,nrow(data)), 
+                 CI.low=rep(0,nrow(data)), CI.high=rep(0,nrow(data)))
+  }
+  
+  for (i in 1:nrow(data)) {
+    dat.i = data[i,]
+    mu = rnorm(n, mean=dat.i$mu, sd=dat.i$mu.sd)
+    a = rnorm(n, mean=prec, sd=prec.sd)
+    b = a/mu
+    dist = rgamma(n=n, shape = a, rate = b)
+    
+    if (return_sample==TRUE) {
+      ppd[i,] = dist
+    } else {
+      dist.mu = mean(dist)
+      d = density(dist)
+      dist.map = d$x[which.max(d$y)]
+      dist.hdi = HDInterval::hdi(dist, credMass=0.89)
+      ppd[i,] = tibble_row(mu=dist.mu, map=dist.map, 
+                           CI.low=as.numeric(dist.hdi[1]), 
+                           CI.high=as.numeric(dist.hdi[2]))
+    }
+  }
+  return(ppd)
+}
+```
+
+```{r}
+# Get inla grid indices where test data resides
+test.idx = inla.stack.index(val.stack, 'test')$data
+
+test.fitted = tibble(mu = mod.test$summary.fitted.values$mean[test.idx], 
+                                  mu.sd = mod.test$summary.fitted.values$sd[test.idx])
+
+system.time(
+  post.pred_test <- pp.dist(data=test.fitted, prec=mod.test$summary.hyperpar$mean[1], 
+                       prec.sd=mod.test$summary.hyperpar$sd[1])
+)
+```
+
+```{r}
+res.test = dat.test %>% 
+  mutate(mu=post.pred_test$mu, CI.low=post.pred_test$CI.low, 
+                               CI.hi=post.pred_test$CI.high) %>% 
+  mutate(y.res = mu-accum)
+
+
+ggplot(data=res.test, aes(accum, mu)) + 
+  geom_point() + 
+  geom_abline(slope=1, intercept=0, color='red') + 
+  # geom_smooth(method = 'lm') + 
+  lims(x=c(200,600), y=c(200,600))
+
+d = density(res.test$y.res)
+d.mode = d$x[which.max(d$y)]
+ggplot(res.test) + geom_density(aes(y.res)) + 
+  geom_vline(xintercept = d.mode, linetype=2, color='red') + 
+  annotate(geom="text", x=d.mode-100, y=max(d$y), 
+           label=paste("MAP =", format(d.mode, digits=3)), 
+           color="red")
+```
+
+### 
+
+Here's some experimental stuff for looking at the variability in our estimates.
+Basically, I think this might represent the expected value (the `fitted.values` from the model) along with the model variance.
+
+We have data drawn from a Gamma distribution
+$$
+y_i \mid \mathbf{X_i},\alpha,s_i,\theta \sim Gamma(a_i,b_i)
+$$
+where the expected value is $E(y_i) = a_i/b_i = \mu_i$ and the variance is $Var(y_i) = a_i/b_i^2 = \mu_i^2/\phi$ where $\phi$ is the precision parameter (this is the same precision parameter as output from `inla` - there is also a scale parameter that has a default of 1 where $Var(y_i) = 1/\tau$ and $\tau = (s\phi)/\mu_i^2$).
+This in turn should mean that ??? $a_i = \phi$ and $b_i = \phi/\mu_i$ ???.
+
+We can therefore report the calculated expected values $\mu_i \in \pmb{\mu}$ along with the modeled random variance $\pmb{\mu}^2/\phi$.
+I'm not sure how this modeled random variance is supposed to differ from the sd reported in `fitted.values` though (I suppose sd must be the standard deviation on the mean parameter, while the modeled variance is the assumed variability about the true mean).
+

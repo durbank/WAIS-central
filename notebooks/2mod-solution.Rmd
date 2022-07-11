@@ -1,0 +1,222 @@
+---
+title: "Two Model solution"
+output: html_notebook
+---
+
+## Model encoding
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(here)
+library(tidyverse)
+library(sf)
+library(cetcolor)
+# library(terra)
+library(INLA)
+library(spdep)
+```
+
+```{r}
+data = readRDS(here('data/Rdata-clean.rds'))
+gdf_traces = readRDS(here('data/Rdata-gdf_trace.rds'))
+```
+
+While I am testing/developing things, I'm only using a small subset of the data (around 1/2 a percent).
+These are spatially distributed across the full region but further limited to the time period 1979--2010.
+This still gives a few thousand observations to work with though.
+Also for initial testing of everything, I am only including select time-invariant covariates.
+Once I have a fully fleshed-out workflow though, I intend to add a few more, including some time-varying climate estimates (e.g. wind vectors).
+I center the covariates about the mean and scale them with the standard deviation, and also normalize the discrete time dimension, setting the min year as Year 1.
+I also perform a training/validation split for later use.
+
+### Data filtering
+
+```{r}
+yr.start = 1985
+yr.end = 2004
+set.seed(777)
+gdf_traces = gdf_traces %>% sample_n(100)
+data = data %>% filter(trace_ID %in% gdf_traces$trace_ID) %>% 
+  filter(Year >= yr.start) %>% filter(Year <= yr.end) %>% 
+  group_by(trace_ID) %>% filter(all(yr.start:yr.end %in% Year)) %>% ungroup() %>% 
+  arrange(trace_ID, Year)
+
+# Select variables of interest
+dat = data %>% select(trace_ID, East, North, Year, accum, 
+                      std, elev, dem, slope, aspect, u10m, v10m, 
+                      mu.u10, mu.v10)
+
+# Center covariates
+yr.min = min(data$Year)-1
+dat = dat %>% 
+  mutate(Year = Year-yr.min, elev = elev-mean(elev, na.rm=TRUE), 
+         dem=dem-mean(dem, na.rm=TRUE), slope=slope-mean(slope, na.rm=TRUE), 
+         u10m=u10m-mean(u10m, na.rm=TRUE), v10m=v10m-mean(v10m, na.rm=TRUE), 
+         mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE)) #%>% 
+  # mutate(Year = Year-mean(Year))
+
+# Scale covariates by sd
+dat = dat %>% 
+  mutate(Year = Year, elev = elev/sd(elev), dem=dem/sd(dem), 
+         slope=slope/sd(slope), u10m=u10m/sd(u10m), v10m=v10m/sd(v10m), 
+         mu.u10=sd(mu.u10), mu.v10=sd(mu.v10))
+
+# Split into training and testing sets
+dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
+dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
+dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
+```
+
+### Model 1
+
+```{r}
+mesh = inla.mesh.2d(loc = dat.train %>% select(East, North), 
+                    max.edge = c(25000, 75000), cutoff = 5000)
+plot(mesh)
+points(dat.train %>% select(East, North), col = "red")
+
+spde = inla.spde2.pcmatern(mesh = mesh, 
+  prior.range = c(15000, 0.01), # P(range < 15 km) = 0.01
+  prior.sigma = c(10, 0.05))
+
+# Index for SPDE model and projector matrix
+spat.idx = inla.spde.make.index(name = "spat.idx", n.spde = spde$n.spde)
+A.spat = inla.spde.make.A(mesh = mesh, loc = cbind(dat.train$East, dat.train$North))
+```
+
+```{r}
+# Make data stack
+dat.stack <- inla.stack(
+  data = list(y = dat.train$accum), 
+  A = list(1, 1, 1, A.spat),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(elev = dat.train$elev, dem=dat.train$dem, 
+                        slope=dat.train$slope, aspect=dat.train$aspect, 
+                        u10m=dat.train$u10m, v10m=dat.train$v10m, 
+                        mu.u10=dat.train$mu.u10, mu.v10=dat.train$mu.v10),
+                 list(time = dat.train$Year),
+                 spat.idx),
+  tag = 'dat')
+
+# Priors for temporal autocorrelation, fixed effects (currently empty), and gamma precision
+time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
+prior.fixed = list()
+prec.prior = list(prior = 'pc.prec', param = c(250, 0.1)) #P(sigma > 250) = 10%
+
+# Model formula
+form = y ~ -1 + Intercept + #modeling the intercept
+  dem + aspect + #fixed effects
+  f(spat.idx, model = spde) + #spatial random effect
+  f(time, model = 'ar1', hyper = time.spec) #Temporal random effect modeled as AR1
+```
+
+```{r}
+mod.1 = inla(form, 
+               data = inla.stack.data(dat.stack), 
+               family = 'Gamma',
+               quantiles = NULL, 
+               control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link = 1), 
+               # control.fixed = prior.fixed, 
+               control.family = list(hyper = list(prec = prec.prior)), 
+               control.compute = list(waic=TRUE, return.marginals.predictor=TRUE, config=TRUE))
+
+```
+
+#### Posterior plots
+
+Below is just a helper function for extracting and transforming marginal distributions to more intuitive scales.
+I've then included some plots of the transformed marginal posteriors.
+The hyperparameters for precisions and the sd's of spatial indices are left untransformed in these plots.
+```{r}
+
+t.marg = function(mod.marg, t.func, param.names=NULL, n=100) {
+  
+  if (any(class(mod.marg) == "matrix")) {
+    mod.marg = list(mod.marg)
+    if (!is.null(param.names)) {
+      names(mod.marg = param.names)
+    } else {
+      names(mod.marg) = "UNNAMED"
+    }
+  }
+  
+  if (is.null(param.names)) {
+    param.names = names(mod.marg)
+  }
+  
+    if (is.list(t.func) != TRUE) {
+    t.func = list(t.func)
+  }
+  if (length(t.func) == 1) {
+    t.func = rep(t.func, length(param.names))
+  }
+  
+  # Preallocate output tbl
+  out = tibble(x=numeric(), y=numeric(), Param=vector(mode="character"))
+  
+  marg.names = names(mod.marg)
+  
+  for (i in 1:length(marg.names)) {
+    marg.i = inla.tmarginal(t.func[[i]], mod.marg[[marg.names[i]]], n=n)
+    out = out %>% bind_rows(tibble(x=marg.i[,1], y=marg.i[,2], Param=param.names[i]))
+  }
+  return(out)
+}
+```
+
+```{r}
+marg.fixed = t.marg(mod.1$marginals.fixed, function(x) exp(x))
+HP.names = c("Gamma precision", "Range for spat.idx", "Stdev for spat.idx", 
+             "Time precision", "Rho for time")
+marg.hyper = t.marg(mod.1$marginals.hyperpar, function(x) (x), param.names = HP.names)
+p.selection = c("Intercept", "Year", "dem", "aspect", "Gamma precision", "Range for spat.idx", 
+                "Stdev for spat.idx", "Time precision", "Rho for time", "Stdev for spYR.idx", 
+                "Range for spYR.idx")
+tmp = marg.fixed %>% bind_rows(marg.hyper) %>% filter(Param %in% p.selection)
+```
+
+```{r fig, fig.width=16}
+ggplot(tmp, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param), scales = "free") + 
+  theme(text = element_text(size = 20))  
+```
+
+Calculate the model residuals
+```{r}
+# Get indices of observed data
+fitted.idx = inla.stack.index(dat.stack, 'dat')$data
+
+dat.train = dat.train %>% mutate(accum.mod=mod.1$summary.fitted.values$mean[fitted.idx]) %>% 
+  mutate(accum.res = accum-accum.mod)
+
+Is=sample(unique(dat.train$trace_ID),3)
+ggplot(dat.train %>% filter(trace_ID %in% Is), aes(Year, accum.res, group=trace_ID)) + 
+  geom_line(aes(color=as.factor(trace_ID))) + geom_smooth(method = 'lm')
+```
+
+Setup of residuals model
+```{r}
+# Make data stack
+stack.res <- inla.stack(
+  data = list(y = dat.train$accum.res), 
+  A = list(1, 1, A.spat),
+  effects = list(list(Intercept = rep(1, nrow(dat.train))), 
+                 tibble(Year=dat.train$Year), 
+                 spat.idx),
+  tag = 'dat')
+
+# Model formula
+form = y ~ -1 + Intercept + #modeling the intercept
+  f(spat.idx,Year, model = spde) #spatial random effect
+```
+
+```{r}
+mod.2 = inla(form, 
+               data = inla.stack.data(stack.res), 
+               family = 'Gaussian',
+               quantiles = NULL, 
+               control.predictor = list(compute = TRUE, A = inla.stack.A(stack.res)), 
+               # control.fixed = prior.fixed, 
+               control.family = list(hyper = list(prec = prec.prior)), 
+               control.compute = list(waic=TRUE, return.marginals.predictor=TRUE, config=TRUE))
+```
+

@@ -1,0 +1,134 @@
+---
+title: "Comparison of WAIS accumulation trends in PAIPR to RACMO"
+output: 
+  html_notebook:
+    code_folding: hide
+---
+
+```{r}
+library(here)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(ggplot2)
+library(sf)
+library(cetcolor)
+```
+
+```{r}
+dat = readRDS(here('data/Rdata-clean.rds'))
+dat.gdf = readRDS(here('data/Rdata-gdf_trace.rds'))
+
+# Remove rows with no RACMO SMB or PAIPR accum estimates
+dat = dat %>% drop_na(SMB, accum)
+
+# Remove high accumulation outliers
+dat = dat %>% filter(accum <= 1000)
+
+# Only select traces with full coverage 1979-2009
+yr.cutoff = 2008
+dat = dat %>% group_by(trace_ID) %>% filter(Year >= 1979) %>% filter(Year <= yr.cutoff) %>% 
+  filter(all(1979:yr.cutoff %in% Year))
+
+# Remove (now) missing traces from gdf
+dat.gdf = dat.gdf %>% filter(trace_ID %in% dat$trace_ID)
+
+# Add mean SMB results to gdf
+dat.gdf = left_join(dat.gdf %>% select(-accum), 
+                    dat %>% group_by(trace_ID) %>% summarise(accum=mean(accum), SMB=mean(SMB)))
+dat.gdf = dat.gdf %>% mutate(accum.res = SMB-accum)
+
+# Calculate residuals
+dat = dat %>% mutate(res = SMB-accum)
+```
+
+Direct 1:1 plot of PAIPR to RACMO (averaged over all years).
+```{r}
+ggplot(dat.gdf) + geom_point(aes(x=accum, y=SMB), color='blue', alpha=0.25) + 
+  geom_smooth(aes(x=accum, y=SMB), method = 'lm') + geom_abline(slope=1, color='red') + 
+  lims(x=c(100,600), y=c(100,600))
+
+ggplot(dat.gdf) + geom_sf(aes(color=accum.res)) + scale_color_gradient2()
+```
+
+```{r PAIPR-RACMO_plots}
+# ggplot(dat) + geom_density(aes(x=res, group=Year, fill=Year), color=NA, alpha=0.2) + 
+#   scale_fill_viridis_c() + 
+#   geom_density(aes(x=res), color='black')
+
+ggplot(dat, aes(x=factor(Year), y=res)) + 
+  geom_hline(yintercept = 0) + 
+  geom_violin(aes(fill=Year), position="dodge", alpha=0.5) + 
+  stat_summary(fun=median, geom="point", size=1, color="red") + 
+  scale_fill_viridis_c()
+```
+
+```{r}
+accum.glm = dat %>% 
+  mutate(Year = Year-mean(Year)) %>% 
+  group_by(trace_ID) %>% 
+  do(tidy(glm(accum ~ Year, family=Gamma(link='log'), data = .))) %>% 
+  filter(term=='Year') %>% select(-term) %>% mutate(est.trans = exp(estimate)-1)
+SMB.glm = dat %>% 
+  mutate(Year = Year-mean(Year)) %>% 
+  group_by(trace_ID) %>% 
+  do(tidy(glm(SMB ~ Year, family=Gamma(link='log'), data = .))) %>% 
+  filter(term=='Year') %>% select(-term) %>% mutate(est.trans = exp(estimate)-1)
+
+dat.gdf = inner_join(dat.gdf, 
+                     accum.glm %>% select(trace_ID, est.trans) %>% rename(estimate=est.trans), 
+                     by="trace_ID", suffix=c(".raw", ".accum")) %>% 
+  left_join(SMB.glm %>% select(trace_ID, est.trans) %>% rename(estimate=est.trans), 
+            by="trace_ID", suffix=c(".accum", ".SMB"))
+```
+
+```{r}
+ggplot(dat.gdf) + geom_density(aes(x=estimate.accum), fill='blue', alpha=0.5) + 
+  geom_density(aes(x=estimate.SMB), fill='red', alpha=0.5)
+```
+
+```{r}
+dat.gdf = dat.gdf %>% mutate(trend.res = estimate.accum-estimate.SMB)
+ggplot(dat.gdf) + geom_density(aes(x=trend.res), fill='blue', alpha=0.5) + 
+  geom_vline(xintercept = 0)
+
+ggplot(dat.gdf) + 
+  geom_sf(aes(color=estimate.accum))  + 
+  # scale_color_gradientn(colours = cet_pal(7, name = "d1"))
+  scale_color_gradient2()
+
+ggplot(dat.gdf) + 
+  geom_sf(aes(color=trend.res))  + 
+  # scale_color_gradientn(colours = cet_pal(7, name = "d1"))
+  scale_color_gradient2(limits=c(-0.025, 0.005))
+```
+
+
+
+
+
+
+```{r}
+ggplot(dat %>% group_by(Year) %>% summarise(SMB=median(SMB), accum=median(accum))) + 
+  geom_line(aes(x=Year, y=accum), color='blue') + 
+  geom_line(aes(x=Year, y=SMB), color='red')
+
+ggplot(dat %>% group_by(trace_ID)) + 
+  geom_line(aes(x=Year, y=accum, group=trace_ID), color='blue', alpha=0.01) + 
+  geom_line(aes(x=Year, y=SMB, group=trace_ID), color='red', alpha=0.01)
+```
+
+
+```{r}
+ggplot(dat.gdf) + geom_sf(aes(color=trace_ID)) + scale_color_viridis_c()
+```
+
+
+```{r}
+ri = dat$trace_ID[sample.int(nrow(dat),1)]
+ggplot(dat %>% filter(trace_ID==ri)) + 
+  geom_line(aes(x=Year, y=accum), color='blue') + 
+  geom_line(aes(x=Year, y=SMB), color='red') + 
+  ggtitle(label = ri)
+```
+
