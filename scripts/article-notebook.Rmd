@@ -1,23 +1,306 @@
 ---
 title: "Publication notebook"
 output: html_notebook
+editor_options: 
+  markdown: 
+    wrap: sentence
 ---
 
 This includes the analysis and figures that will go into the draft publication of the central WAIS trends article.
 This will also be a space for drafting and iterating on the wording for methods/analysis/interpretation description.
 
+## INTRODUCTION
+
+The West Antarctic Ice Sheet (WAIS) is highly relevant to our understanding of Southern Hemisphere climate dynamics and to projections of future sea level.
+Already the WAIS is contributing to global sea level changes, having added at least an additional $6.9 \pm 0.6$ mm since 1979 \cite{rignot_four_2019}.
+An understanding of snow accumulation patterns and processes is an essential component of sea level rise calculations, both directly as a contribution to overall mass balance and indirectly, as the surface mass balance (SMB) affects estimates of ice sheet net mass change from other methods---e.g.
+altimetry and gravimetry measurements \cite{velicogna_timevariable_2013, shepherd_trends_2019}.
+Such effects on the net mass change are nontrivial and changes in accumulation can even dominate the integrated height change signal in at least some circumstances \cite{kuipersmunneke_elevation_2015}.
+Additionally, understanding the recent spatio-temporal trends and patterns in precipitation over recent decades provides insight into how atmospheric and oceanic dynamics are changing in the Southern Hemisphere and globally.
+
+Despite the critical need for increased understanding, our knowledge of West Antarctic SMB is hampered by a paucity of data and data coverage \citep{koenig_remote_2014}.
+The extremely remote and harsh environment of the region make \textit{in-situ} measurements challenging and expensive to collect.
+SMB is often highly spatially variable \cite{spikes_variability_2004, banta_spatial_2008, dattler_significant_2019}, leading to questions of how representative small samples of measurements are of the ice sheet as a whole.
+Although satellite-based radar altimeters provide widespread spatial coverage, they typically have coarse resolutions of tens of kilometers and the degree of signal penetration beneath the surface complicates interpretations of height changes \cite{lenaerts_observing_2019}.
+More recent lidar altimeters address some of these limitations, but have a limited temporal range \cite{smith_pervasive_2020}.
+Both radar and lidar altimetry results are further complicated by the need to disentangle signals between changes in SMB, dynamical ice flux, firn compaction, and isostatic uplift.
+Modeling results have seen enormous strides forward, but validation with independent estimates of SMB are still important, especially in data-sparse regions like West Antarctica \citep{lenaerts_observing_2019}.
+Additionally, models still have too coarse of resolution (often 10's of kilometers) to resolve small-scale (\textless5 km) spatial variability \cite{lenaerts_climate_2018} and still have limitations on how well they can capture interannual variability in Antarctic SMB \cite{wang_comparison_2016}.
+Radar has been used for decades to estimate SMB \cite{spikes_variability_2004, anschutz_smallscale_2008, eisen_groundbased_2008}, but still suffers from limitations of homogeneous coverage and processing bottlenecks usually involving labor-intensive manual work, especially for reconstructing annually-resolved SMB time series \cite{medley_airborneradar_2013, lenaerts_observing_2019}.
+
+In spite of these difficulties, substantial progress has been made towards improved understanding of SMB over recent decades in the WAIS.
+Numerous ice core studies suggest accumulation rates in and near the Antarctic Peninsula have recently increased \cite{thomas_doubling_2008, thomas_308_2013, thomas_twentieth_2015, hosking_accumulation_2017, medley_increased_2019}.
+This observation is supported by results from a number of climate models and reanalyses \cite{wang_comparison_2016}.
+Evidence also exists for decreased accumulation over similar time periods for the western portions of WAIS, near the Ross Sea \cite{wang_comparison_2016, wang_snow_2017, medley_increased_2019}, although the \textit{in-situ} observations in this region are more sparse and largely out of date \cite{thomas_regional_2017}.
+As a whole, the central region of WAIS shows smaller changes in snow accumulation, but such results vary considerably both spatially across central WAIS and between studies \cite{banta_spatial_2008, medley_airborneradar_2013, burgener_observed_2013, wang_comparison_2016, thomas_regional_2017, wang_snow_2017}.
+
+Important questions therefore remain regarding the spatial distribution of accumulation trends across WAIS and particularly regarding the nature and location of the transition in central WAIS between the predominantly increasing accumulation of eastern WAIS and the Antarctic Peninsula and the decreasing accumulation in western WAIS.
+Understanding these transitions are important to properly interpret the climatic elements driving the observed changes and to facilitate improved ice sheet-wide estimates of trends in annual SMB.
+
+In this study we construct annually-resolved SMB time series for a region of central WAIS from airborne radar at high spatial resolution and investigate the subsequent spatio-temporal patterns and trends in the data.
+The method for estimating SMB time series from radar is fully automated, includes uncertainty estimation for individual years and locations, and includes a quality-control routine that can automatically remove data poorly suited to the method.
+We use these data to inform a Bayesian statistical model that can leverage the data uncertainties and extend estimates to unobserved spacetime points across the region.
+This modeling therefore permits a more spatially detailed and staistically robust investigation of recent changes in SMB across central WAIS.
+
 ## METHODS
 
-### Data imports and preprocessing
+### Data and study site
+
+This study focuses on a \mytilde250,000 km\textsuperscript{2} region of central West Antarctica (\figref{data-map}).
+The region spans a range of accumulation rates (\textless200 mm w.e. to \textgreater750 mm w.e.) and topographic settings, encompassing a portion of the ice divide between the Amundsen Sea and the Ross Sea sectors.
+Although some ice velocities in the coastal areas of this region can exceed 200 m/a, typical \emph{in-situ} velocities for our data coverage are \mytilde20 m/a or less \citep{rignot_ice_2011}.
+One reason this region is significant is because it encompasses portions of the Pine Island Glacier and Thwaites Glacier drainage basins.
+These outlet glaciers had a net mass loss of 1,700 gigatonnes of ice for the period 1979-2017, with the annual contribution also accelerating over that time period \cite{rignot_four_2019}.
+This region additionally has an acceptably dense network of firn density measurements (a total of 16 cores) to properly constrain depth-density modeling (discussed in Section \ref{sec:density}) with increased confidence.
+Finally, this region is between the Antarctic Peninsula---where strong evidence exists of increased accumulation rates over recent decades---and the region near the Ross Sea---where evidence exists for decreased accumulation rates over recent decades \citep[e.g.]{medley_increased_2019, thomas_regional_2017}.
+It is therefore relevant to understanding the extent, boundaries, and patterns of changes in accumulation rates for the entire WAIS.
+
+The main data used in this study are radar echograms from NASA's Operation IceBridge (OIB) Snow Radar.
+This frequency-modulated continuous-wave radar operates in a frequency range (2-8 GHz) with a range resolution (\mytilde5 cm in firn) that permits imaging of annual resolution in Antarctic firn \cite{panzer_ultrawideband_2013}.
+We use portions of 9 OIB flights over the region of interest with collection times spanning 2010-2016.
+
+Estimating annual accumulation from radar echograms relies on the ability of microwave electromagnetic radiation to penetrate the ice sheet surface and propagate through the snow and firn.
+Seasonal variations in the dielectric properties of the preserved firn result in internal reflection horizons (IRHs) in the radar returns.
+When continuous over many kilometers, these IRHs are most often interpreted as isochronous seasonal layers that can be used to determine the age of deposition \cite{eisen_groundbased_2008}.
+To determine accumulation rates, the echogram time-domain must be converted to depth.
+This requires estimates of firn density with depth to determine radar propagation velocity.
+The firn depth-density profile is also used when converting layer thickness to cumulative mass with depth.
+The cumulative mass profile combined with the calculated ages of the IRHs yields annual estimates of accumulation.
+
+In addition to the radar data used, this study utilizes a suite of ice and firn cores, both for informing the the depth-density model and for comparisons of accumulation rates and trends generated with the radar data.
+We use density data from the Satellite Era Accumulation Traverse \cite{burgener_observed_2013}, the WAISCORES program \cite{lamorey_waiscores}, the International Trans-Antarctic Scientific Expedition \cite{mayewski_international_2005}, and additional cores included in the Surface Mass Balance and Snow on Sea Ice Working Group data set \cite{montgomery_sumup_2018}.
+For comparisons of annual accumulation rates and trends we additionally use cores included in the Past Global Changes Antarctica 2k compilation \cite{thomas_regional_2017}.
+
+### Depth-density modeling
+
+The calculation of radar accumulation time series requires estimates of depth-density profiles to convert radar echograms from the time domain into the depth domain and to estimate annual accumulation from layer thickness.
+Various methods have been proposed for estimating the variation of density with depth in Antarctic firn, typically either interpolating from measured ice core or stake farm data \cite{medley_airborneradar_2013} or based on the physical modeling and evolution of firn properties \cite{ligtenberg_improved_2011}.
+
+In this study, we use a statistical estimation and interpolation approach informed by \emph{in-situ} observations as described in \citet{white_hierarchical_2021}.
+This model uses a positive-valued Bayesian semi-parametric model over space and depth below the ice sheet as its building block.
+To impose the monotone increasing shape of the depth-density curve, we integrate the positive-valued function over the depth domain.
+The integrated function is transformed to be bounded below by 0 g/cm$^3$ and 0.917 g/cm$^3$ to constrain the model's mean function to appropriate values for firn/ice density.
+This model imposes smoothness of firn density estimates in the space and depth domains, constrains the shape of firn density curves, and enables simple interpolation (see \citet{white_hierarchical_2021} for more details).
+There are several advantages afforded by this method, most importantly its ability to leverage space-depth autocorrelation to interpolate the shape-constrained depth-density profiles to new locations with relatively few model assumptions.
+Moreover, because we fit the model in a Bayesian framework, our method provides rigorous uncertainty quantification of the depth-density profiles at arbitrary sites.
+This allows us to effectively propagate uncertainty in firn density estimates to SMB estimates.
+
+### SMB estimation with PAIPR
+
+In this study, we estimate annually-resolved accumulation rates from OIB Snow radar using an automated process, the Probabilistic Annual Isochrone Picking Routine---i.e.
+PAIPR \cite{keeler_probabilistic_2020}.
+This algorithm picks continuous IRHs using localized Radon transforms and assigns each a likelihood of representing an annual isochrone based on the relative strength of the radar return and the continuous length of the horizon.
+These likelihoods, along with errors in the depth-density modeling (discussed above), are then used in Monte Carlo sampling to generate uncertainty estimates in the the final annual accumulation estimates.
+The algorithm processes radar data in 30-km chunks, generating results with 25-meter along-track spacing which we aggregate to 200-meter, annually-resolved accumulation distributions.
+We limit analysis to the upper \mytilde25 meters of the firn to ensure no issues with loss of layers due to excessive attenuation of IRH signals with depth.
+The complete period of data coverage therefore varies spatially due to varying accumulation rates, spanning from ten years to fifty-seven years of total record duration.
+Further details of the method are available in \citet{keeler_probabilistic_2020} and \citet{keeler_repeatability_2021}.
+
+The primary advantages of the PAIPR method over more traditional techniques are the fully automated nature of the method and the more complete uncertainty assessment.
+The automated nature of PAIPR allows a wide and rapid application to larger OIB data sets.
+The addition of the quality control routine (see \citet{keeler_repeatability_2021} for details on its implementation) permits this application without careful vetting of input data, as poorly-suited data is flagged and can be removed from additional analyses.
+The inclusion of uncertainties (resulting from both input data and modeling errors) allows a more rigorous assessment of the relevance and significance of observed magnitudes, patterns, and trends.
+These uncertainies are further utilized in our Bayesian modeling framework (see Section ?).
+
+The PAIPR results still have important limitations worth noting.
+The degradation in signal with depth limits the time period over which reliable results are generated, with the temporal duration controlled by the \emph{in-situ} accumulation rate.
+PAIPR cannot produce time series of long duration in high accumulation regions, limiting interpretations of temporal variability and trends in these regions.
+Additionally, the method is reliant on nearby depth-density measurements or modeling, affecting results both in the depth migration steps and in the cumulative mass estimates.
+Reliable SMB estimates therefore rely on sufficient firn/ice core coverage in the region of interest, or else reliable firn density modeling where \emph{in-situ} measurements are not available.
+The method also does not account for dynamical thinning of annual layers.
+The shallow firn column used in PAIPR (\mytilde25 m) limits the impact of this issue, but such effects could still be relevant in regions of high ice velocity (e.g. \citet{mouginot_continentwide_2019} show some regions of WAIS near the coast can have \textgreater 1 km a\textsuperscript{-1} ice velocities).
+\citet{konrad_observations_2019} however, found that even for the region of Pine Island Glacier, \mytilde80% of strain rate correction magnitudes were lower than the uncertainty in radar-derived SMB estimates in the region.
+
+The layer-likelihood parameters in PAIPR were trained using manually-traced layers and validated against firn core data.
+The results could therefore be biased towards the specific regions used to train the likelihood parameters.
+The training data were selected to contain a spatially-distributed sample of central WAIS with a range of accumulation rates and conditions.
+This variability in training data, combined with the MC simulations on the uncertainty in the tuned parameters, should make this method applicable to a wide range of conditions, but would be less suited to regions of Antarctica significantly different than the range of conditions represented in the training data.
+Finally, the SMB results are still limited by data availability.
+NASA's Operation IceBridge focused on specific regions and research goals, affecting the selection of flight plans and regions of study.
+This results in some areas with a high density of data coverage (both spatially and temporally) with much more limited or no coverage in other regions (e.g. interior portions of the Antarctic ice sheets).
+Even with such limitations, the spatial coverage afforded by OIB SMB results is orders of magnitude greater than traditional firn/ice core, automatic weather stations, or stake farm measurements, regions poorly suited to PAIPR application are automatically filtered from results, and rigorous uncertainties are generated for SMB estimates.
+
+### Data processing and modeling
+
+The final output from PAIPR includes estimates of the modal value and standard deviation of accumulation for each year of a given trace (25-meter along-track spacing, aggregated into 200-meter bins to increase estimate sample size) and a quality rating for whether the results are usable based on the suitability of PAIPR to the particular echogram.
+We remove time series with less than 10 years of estimates, as we frequently observed inaccurate results for regions with few time series elements.
+To avoid biases in early year estimates (i.e. the earliest years are only available for regions of low accumulation rates), we focus on study on the time period 1975--2015.
+This 40-year time period exhibits good spatial coverage across the full region.
+After excluding data flagged as poor and filtering the remaining data with the above criteria, the final dataset consists of 683,676 individual estimates of annual accumulation at 21,887 spatial locations.
+<!-- After excluding data flagged as poor and locations with limited temporal coverage, the final dataset consists of 703,215 individual estimates of annual accumulation at 21,887 spatial locations spanning some portion of the period 1959--2015. -->
+
+<!-- Due to the decreased temporal coverage with increasing accumulation rates, the exclusion criteria effectively limit our analysis to regions with annual accumulation less than \mytilde650 mm w.e. -->
+
+<!-- Although the remaining time series vary in total duration from 10--57 years, the estimated mean accumulation for the full records change negligibly between using the full time period and using a consistent 40-year time period of 1975--2015 (see \figref{accum-map} for additional details on this comparison). -->
+
+<!-- This matches the findings of \citet{wang_comparison_2016}, who found the effect of changing accumulation rates over several decades was small compared to spatial variability. -->
+
+<!-- We therefore ignore the temporal heterogeneity in our mean accumulation investigations in order to improve spatial coverage and extent. -->
+
+<!-- This results in 4,008 unique time series corresponding to different 1-km grid cells. -->
+
+<!-- For trend analyses, we subset the grid cells to time series with complete coverage in the 31-year period 1979-2010. -->
+
+<!-- This time period was selected as a compromise between longer temporal and greater spatial coverage. -->
+
+<!-- The final data set used in trend analyses consists of 2,091 individual time series for 1-km grid cells. -->
+
+<!-- Accumulation time series exhibit high interannual variability. -->
+
+<!-- This, combined with the uncertainty in the estimates of individual years and the 31-year time period, could produce spurious trends in the results \cite{rupper_effects_2015}. -->
+
+<!-- To minimize this impact, we calculate linear trends in accumulation time series using bootstrapping with replacement and weights based on the estimated uncertainty of individual annual estimates. -->
+
+<!-- We perform 1,000 iterations to approximate a continuous distribution of trends to generate more robust estimates of the mean trend result and uncertainty in those estimates.  -->
+
+#### Bayesian model
+
+We use a Bayesian approximation method to investigate the spatial variability in the temporal trend in accumulation rates across the study region.
+This choice confers a number of benefits.
+The explicit and joint-probability uncertainty in a Bayesian approach allows more full utilization of the PAIPR-generated uncertainties and provides uncertainty for every parameter and estimate within the model.
+A Bayesian approach also incorporates domain-specific a priori knowledge into model estimates.
+The use of an approximation method vastly improves computation time and makes analyses of large datasets (e.g. times series generated from PAIPR) computationally tractable.
+We utilize Integrated Nested Laplace Approximations INLA) to leverage the noted advantages.
+This method has recently seen widespread adoption in modeling spatiotemporal physical phenomena in a variety of fields \cite{}.
+
+*Will move most of the following to a supplement, with only a brief summary included in the main document.*
+
+The PAIPR-derived accumulation time series represent a continuous distribution of a random variable over two continuous spatial dimensions and indexed over an additional discrete temporal dimension (i.e. individual years).
+We therefore choose to model accumulation as a Gamma distribution to ensure a zero-bounded function with increased variance at higher expected values as also observed in the raw data.
+This furthermore matches established literature where precipitation values are frequently assumed to follow a Gamma distribution **(citations)**.
+We express this distribution in terms of the expected accumulation for an arbitrary space location and time point $\mu_{s,t}$ and a precision parameter at the corresponding time $\phi_t$ $$\mathbf{Y} \sim Gamma(\mu_{s,t},\phi_t)$$ where the variance at an arbitrary spacetime point is $$Var(s_t) = \frac{\mu_{s,t}^2}{\phi_t}$$
+
+For each observation $y_{s,t} \in \mathbf{Y}$, we construct a linear predictor $\eta_{s,t}$ associated with the expectation value $\mu_{s,t}$ via a log link function.
+$$\log(\mu_{s,t}) = \eta_{s,t}$$
+
+We further model $\eta_{s,t}$ as a generalized linear equation consisting of fixed effect variables $\mathbf{X}$ and smoothed random latent effects (in this case modeling a spatial random effect $u(\cdot)$ and a temporal random effect $\omega(\cdot)$).
+To explicitly model $u(\cdot)$ as a trend in accumulation over time, we further index this random variable by year.
+The equation for our generalized linear model is therefore: $$
+\eta_{s,t} = \alpha + \sum^M_{m=1} \beta_m x_{m,s} + u(s)\times t + \omega(t)
+$$
+
+This model therefore accounts for fixed global effects, a spatially-varying latent effect indexed on time (i.e. providing explicit estimates of trends in annual acculation), and a temporally-varying latent effect.
+
+The latent random effects $u$ and $\omega$ are indexed by a set of parameters $\theta_s$ and $\theta_t$ that account for the spatial and temporal correlation in the data.
+We model these correlation structures (as defined by the parameters $\pmb{\theta}$) as latent stationary Gaussian fields, using a function of the hyperparameters $\pmb{\psi}$ and an associated prior distribution $p(\pmb{\psi})$.
+This is equivalent to assuming that $\pmb{\theta}$ is associated with some multivariate Normal distribution with mean $\mu = (\mu_1,...,\mu_n)'$ and covariance structure $\Sigma$, where $\Sigma_{jk} = Cov(\theta_j, \theta_k)$.
+
+$$
+\pmb{\theta} \sim \mathcal{N}(\mu_\theta, \Sigma_\theta)
+$$
+
+By assuming adherence to Markovian properties, the precision matrix $Q = \Sigma^{-1}$ is sparse, with the non-zero components of $Q$ completely given by the neighborhood structure ($N$) of the process, i.e. $Q_{jk} \neq 0 \iff k \in \{j,N(j)\}$.
+The specification of a Gaussian-Markov Random Field for both the spatial and temporal structures permits vast improvements in computational efficiency.
+The choice of a separable space/time model (where the spatial and temporal random effects are modeled independently) also greatly improves computation time but will fail to capture any co-dependencies between these effects.
+
+We model the spatial random effect as a stochastic partial differential equation...
+
+We model the temporal random effect $\omega$ (representing how the mean spatial field evolves in time) as a second-order autoregressive model where $$\omega_t = \rho \omega_{t-1}$$ An AR(2) process was selected due to the observed temporal autocorrelation in the data, which indicates that accumulation retains autocorrelation up to a 2-year lag time.
+
+The modeling objective, therefore, is to find the joint posterior distribution of the various parameters of interest, permitting inference over the processes governing accumulation in the region and making predictions at unobserved locations possible.
+$$P(\phi, \alpha, \pmb{\beta}, \rho, R_s, \sigma_s \mid \mathbf{Y})$$
+
+## RESULTS
+
+Estimates of mean annual accumulation (shown in \figref{accum-map}) are similar to those found by \citet{medley_airborneradar_2013} using manually traced IRHs from OIB Snow Radar echograms.
+Accumulation is highest (and exhibits the highest variability) close to coastal West Antarctica and progressively decreases towards the interior.
+%, as observed in numerous prior studies \cite{}.
+Considerable spatial variability, however, overlays this broader signal.
+The most likely source of this higher-order spatial variability is accumulation and wind re-distribution governed by surface topography and near-surface winds \cite{dattler_significant_2019}.
+
+The region overall shows generally insignificant trends in annual SMB for the period 1975-2015 (\figref{trend-map}).
+This is in agreement with a number of previous studies that found insignificant changes in accumulation during the latter portion of the 20th century.
+\citet{medley_airborneradar_2013} found no significant trends in SMB for the period 1980-2009 when compositing all OIB Snow Radar time series in their study for an overlapping region.
+\citet{wang_snow_2017} found little to no trend (0.18% per decade) in snow accumulation in central WAIS based on composite ice cores in the region for the period 1900-2010 and weakly positive trends (2.08% per decade) for the same region and time period using ERA-20C reanalysis data.
+\citet{wang_comparison_2016} compared the results of several climate models and reanalyses for the period 1979-2012, including ERA-Interim, JRA-55, MERRA, PMM5, RACMO2.1, and RACMO2.3.
+They found considerable spatial variability in the linear trends in SMB for the central WAIS, including opposing signs of the trend, but none showed significant trends over this period in the region.
+
+Although the majority of our time series show insignificant trends, large spatial heterogeneity exists in the results, with 34% of the total results showing significant negative trends (95% confidence interval) for 1975-2015.
+\textless1% of the trend results show statistically significant positive trends in this time interval.
+More negative trends tend to occur in the western portions of the region, with less negative and insignificant trends towards the east, but with important variability in these general observations (\figref{trend-map}).
+95% of accumulation changes in the region vary between -65 mm decade\textsuperscript{-1} and +7.2 mm decade\textsuperscript{-1} (-17% decade\textsuperscript{-1} and 2.1% decade\textsuperscript{-1} relative to the multi-decadal mean accumulation).
+<!-- The east-west pattern of accumulation trends persists after correcting for mean accumulation rate---i.e. more negative accumulation trends as a percent of mean accumulation towards the west (\textbf{b} in \figref{trend-map}). --> The observed trend magnitudes are similar to those observed in ice and firn cores across the region and for a wider area of WAIS (\textbf{d} in \figref{trend-map}), but provide important context of the spatial variability and patterns in those trends.
+Although individual cores suggest a similar pattern, they alone are insufficient to resolve the statistical significance of the overall results or to properly demonstrate the spatial nature and heterogeneity of the patterns.
+
+\citet{medley_increased_2019} used ice core compilations combined with reanalysis-derived spatial coherence patterns to estimate Antarctic-wide snow accumulation.
+Their results also show a strong east-west dipole in SMB over WAIS (thought to be driven by the Southern Annular Mode) in the period 1957-2000, with enhanced (decreased) precipitation towards the Antarctic Peninsula (Ross Sea).
+\citet{wang_new_2019} observed a similar dipole in SMB trends for the period 1950-2010 using a kriging reconstruction from ERA-Interim outputs informed by ice core records.
+Our results agree broadly with these conclusions, but indicate greater variability in the trend direction for central WAIS compared to either study, with significant negative trends for the period 1979-2010 extending farther east.
+These results are specifically in agreement with the findings of \citet{burgener_observed_2013}, who found decreasing accumulation since 1975 from several firn cores near WAIS Divide.
+
+\citet{thomas_regional_2017}, using composite ice core records and SMB from RACMO2.3p2, found that for the portion of WAIS between 90\mydegree--150\mydegree W, 50-year running linear trends varied mostly within $\pm1$ mm a\textsuperscript{-1}, with the period 1961-2010 showing a trend of \mytilde0.65 mm a\textsuperscript{-1}.
+Our results---representing a region comprising \~1/3 of the WAIS section in \citet{thomas_regional_2017}---show a spatially integrated trend of -1.8 mm a\textsuperscript{-1} (-0.49% a\textsuperscript{-1}) for the whole region of study, but larger variability spatially of -6.5 mm a\textsuperscript{-1} to +0.72 mm a\textsuperscript{-1}.
+Importantly, the WAIS regions between 90\mydegree--150\mydegree W not included in our results are mostly from the Ross Sea region.
+This region exhibits decreasing accumulation rates in recent decades \cite{wang_snow_2017, bertler_ross_2018, medley_increased_2019, wang_new_2019}, so its exclusion in our study is unlikely to explain the discrepancy between our results and \citet{thomas_regional_2017}.
+
+## Discussion and conclusions
+
+The observation of statistically significant negative trends in this region is somewhat anomalous compared to many previous studies.
+Several mechanisms/rationales could potentially explain the observed patterns of negative trends, including (1) systemic issues/errors in the PAIPR method itself, (2) spurious trends in the data, (3) multi-decadal internal climate variability, and/or (4) significant changes in the atmospheric or climate system of central WAIS.
+
+As with any method, PAIPR could be susceptible to biases or errors not immediately obvious in the results.
+Inherent biases could exist in the depth-density modeling, although such effects should be minimal as our region of study is well-represented with firn cores and modeling error is incorporated into the final uncertainties used in PAIPR \cite{white_hierarchical_2021}.
+Increased difficulty in picking IRHs at depth could lead to artificial negative trends, either by picking too few layers at depth or by picking too many near-surface IRHs.
+Our exclusion of deeper results (\textgreater \mytilde25 m depth) should minimize such errors and our use of bootstrapping to calculate trends will limit the influence of leveraging from both deep and shallow outliers.
+Additionally, \citet{keeler_repeatability_2021} compared SMB time series from repeat OIB flights using PAIPR and showed minimal bias at depth or in overall trends using the PAIPR method.
+Finally, the close agreement with our results with \emph{in-situ} records where available suggest that such widespread and systemic issues with PAIPR, if present, are unlikely to exert a large influence on the results in this study.
+
+If the PAIPR method itself lacks a systemic bias, several other mechanisms could be responsible for the observed trends.
+It's likely some of the observed trends are statically spurious, as is especially common in SMB time series of shorter duration \cite{rupper_effects_2015, wang_comparison_2016}.
+The bootstrapping techniques employed in our trend analyses minimizes the impact of small numbers of erroneous or anomalous points on the computed trends and should therefore limit the introduction of spurious statistically significant trends.
+Furthermore, the widespread and spatially coherent nature of many of these trends, combined with similar agreement in available core time series, supports the idea of limited influence from purely statistical spurious effects.
+
+The observed trends could also be an expression of multi-decadal internal climate variability.
+West Antarctic climate has high variability, with substantial annual, decadal, and centennial scale variability \cite{turner_amundsen_2013, jones_assessing_2016, king_antarctic_2020}.
+The shorter record of much of our investigation (31 years) makes such a possibility more likely.
+A number of these significant trends, however, persist when expanding the results to longer time periods and greater spatial averaging, suggesting they could result from an underlying forcing or change in the climate system.
+Given the high climate variability in the region even at centennial time scales, longer-term trends such as these could occur in the absence of more noteworthy changes in climate.
+
+The observed trends could also result from broader systemic changes in Antarctic climate.
+The observed trends are unlikely to be purely the result of thermodynamic changes, as the high degree of warming observed in the region over recent decades \cite{bromwich_central_2013, jones_assessing_2016} is at odds with the observed losses in accumulation.
+This would suggest changes in atmospheric dynamics and moisture transport as the most likely cause of the observed accumulation trends.
+Several observed changes in the region (discussed below) could explain decreased accumulation over central WAIS.
+These changes are not mutually exclusive, with many of them coupled together or otherwise interrelated.
+
+Sea ice extent in the Ross-Amundsen Sea sector has steadily increased since 1979 \cite{jones_assessing_2016}, which could result in decreased accumulation for the interior of central WAIS.
+Furthermore, sea ice extent has declined in the Amundsen-Bellingshausen Sea sector over the same time period, which could help explain the increased precipitation closer to the Antarctic Peninsula.
+The Southern Annular Mode (SAM), the dominant mode of climate variability in the Southern Hemisphere high latitudes \cite{thompson_annular_2000}, exerts an influence on West Antarctic precipitation, particularly through its effects on extratropical storm tracks \cite{wang_trends_2013, marshall_signatures_2016}.
+The observed trend towards the SAM positive phase since the 1970's could therefore influence accumulation trends in our region of study \cite{marshall_trends_2003a, turner_atmosphere_2017}.
+Several studies have suggested teleconnections between tropical sea surface temperatures and West Antarctic air temperatures \cite{ding_winter_2011, ding_influence_2012, steig_recent_2013} which could have additional influences on SMB in the region.
+
+Much of the climate variability in WAIS specifically results from the presence of the Amundsen Sea Low (ASL) \cite{raphael_amundsen_2015, turner_atmosphere_2017}.
+The zonal and meridional position of the ASL has a well-defined annual cycle, with an extreme southern (northern) and western (eastern) position near the Ross Sea (Antarctic Peninsula) in winter (summer).
+The ASL produces a strong effect on storm tracks in the region, causing a dipole in moisture and warm air advection in West Antarctica, increasing precipitation in eastern West Antarctica near the Peninsula, and decreasing precipitation to the west near the Ross Sea \cite{emanuelsson_role_2018}.
+Although the ASL varies seasonally (with a minimum in winter and maximum in summer \cite{hosking_influence_2013}), the mean depth of the system over recent decades has increased both seasonally and annually \cite{turner_amundsen_2013}.
+This deepening could strengthen the east-west accumulation dipole across WAIS, explaining the first-order spatial pattern of accumulation trends seen in our results.
+
+On a more local scale, the results suggest linear trends in accumulation are spatially variable.
+This includes significant reductions in accumulation rates for central WAIS farther east than found previously.
+The results further show high variability in significant trend magnitudes over distances of a few kilometers, with even opposing signs of trend within 10-km distances.
+Such small scale differences are not discernible with the resolution of most current modeling products over the region \cite{lenaerts_climate_2018}.
+More dense data networks (such as those provided by ice-penetrating radar and automated processes like PAIPR) therefore provide important insights regarding the nature and pattern of these spatiotemporal changes in SMB that are difficult to obtain with other methods.
+The exact cause of this high spatial variability is currently unknown.
+Several studies show surface topography and wind vectors exert strong influences on mean annual accumulation rates in WAIS \cite{dattler_significant_2019}.
+Such factors could theoretically play an important role in the spatial patterns of accumulation trends as well.
+
+In this study, we reconstructed annually-resolved accumulation time series for 1-km aggregated grids from Operation IceBridge Snow Radar echograms using the fully-automated PAIPR method.
+The results showed high spatial variability on the scale of current climate model resolutions, both for mean annual accumulation and for trends in accumulation rates over recent decades.
+The results furthermore demonstrate an east-west dipole in accumulation over central WAIS (as also found by prior investigations) and suggest significant losses in accumulation extend farther east in WAIS than shown in previous studies.
+The results highlight important advantages (fine spatial resolution, broad spatial coverage, annual temporal resolution, etc.) afforded by a dense network of observations as provided by radar echograms compared to either \textit{in-situ} accumulation measurements or modeling efforts.
+Such advantages improve our ability to investigate the spatiotemporal patterns and trends of WAIS SMB over recent decades, both in the context of broader synoptic-scale and finer local-scale mechanisms.
+In this way, we can better ascertain the dominant source of the observed changes (whether natural climate varability or anthropogenic forcings) occurring now and in the future.
 
 Load libraries:
+
 ```{r}
 library(here)
 library(INLA)
+# library(inlabru)
 library(dplyr)
 library(tidyr)
 library(broom)
 library(ggplot2)
+library(terra)
 library(colorspace)
 library(spdep)
 ```
@@ -42,13 +325,14 @@ data.all = data.all %>% filter(trace_ID %in% trace.keep$trace_ID)
 gdf_traces = gdf_traces %>% filter(trace_ID %in% trace.keep$trace_ID)
 
 # Subset data to every 5th location (coarsens data to ~1 km)
-skip.int = 5
+skip.int = 3
 gdf.idx = seq(1, nrow(gdf_traces), by=skip.int)
 gdf_traces = gdf_traces[gdf.idx,]
 
 # Filter data to subsetted period
 data = data.all %>% filter(trace_ID %in% gdf_traces$trace_ID) %>%
-  filter(Year >= 1975) %>% filter(Year < 2015) %>% arrange(trace_ID, Year)
+  filter(Year >= 1975) %>%
+  filter(Year < 2015) %>% arrange(trace_ID, Year)
 
 # Remove gdf rows where all data have been filtered out
 gdf_traces = gdf_traces %>% filter(trace_ID %in% data$trace_ID)
@@ -83,6 +367,7 @@ dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
 ```
 
 Directly calculate linear coefficients of time from raw data.
+
 ```{r}
 yr.trends = dat.train %>% 
   group_by(trace_ID) %>% 
@@ -94,55 +379,10 @@ dat.mu = dat.train %>% group_by(trace_ID) %>%
   mutate(log.est = log(1+(estimate/accum)))
 ```
 
-### Model setup
-
-The accumulation data represent a continuous distribution of a random variable over two continuous spatial dimensions and indexed over an additional discrete temporal dimension (e.g. annually resolved time series).
-We therefore choose to model accumulation as a Gamma distribution to ensure a zero-bounded function with increased variance at higher expected values as also observed in the raw data.
-This furthermore matches established literature where precipitation values are frequently assumed to follow a Gamma distribution **(citations)**.
-We express this distribution in terms of the expected accumulation for an arbitrary space location and time point $\mu_{s,t}$ and a precision parameter at the corresponding time $\phi_t$ 
-$$\mathbf{Y} \sim Gamma(\mu_{s,t},\phi_t)$$
-where the variance at an arbitrary spacetime point is
-$$Var(s_t) = \frac{\mu_{s,t}^2}{\phi_t}$$
-
-For each observation $y_{s,t} \in \mathbf{Y}$, we construct a linear predictor $\eta_{s,t}$ associated with the expectation value $\mu_{s,t}$ via a log link function.
-$$\log(\mu_{s,t}) = \eta_{s,t}$$
-
-We further model $\eta_{s,t}$ as a generalized linear equation consisting of fixed effect variables $\mathbf{X}$ and smoothed random latent effects (in this case modeling a spatial random effect $u(\cdot)$ and a temporal random effect $\omega(\cdot)$).
-To explicitly model $u(\cdot)$ as a trend in accumulation over time, we further index this random variable by year.
-The equation for our generalized linear model is therefore:
-$$
-\eta_{s,t} = \alpha + \sum^M_{m=1} \beta_m x_{m,s} + u(s)\times t + \omega(t)
-$$
-
-This model therefore accounts for fixed global effects, a spatially-varying latent effect indexed on time (i.e. providing explicit estimates of trends in annual acculation), and a temporally-varying latent effect.
-
-The latent random effects $u$ and $\omega$ are indexed by a set of parameters $\theta_s$ and $\theta_t$ that account for the spatial and temporal correlation in the data.
-We model these correlation structures (as defined by the parameters $\pmb{\theta}$) as latent stationary Gaussian fields, using a function of the hyperparameters $\pmb{\psi}$ and an associated prior distribution $p(\pmb{\psi})$.
-This is equivalent to assuming that $\pmb{\theta}$ is associated with some multivariate Normal distribution with mean $\mu = (\mu_1,...,\mu_n)'$ and covariance structure $\Sigma$, where $\Sigma_{jk} = Cov(\theta_j, \theta_k)$.
-
-$$
-\pmb{\theta} \sim \mathcal{N}(\mu_\theta, \Sigma_\theta)
-$$
-
-By assuming adherence to Markovian properties, the precision matrix $Q = \Sigma^{-1}$ is sparse, with the non-zero components of $Q$ completely given by the neighborhood structure ($N$) of the process, i.e. $Q_{jk} \neq 0 \iff k \in \{j,N(j)\}$.
-The specification of a Gaussian-Markov Random Field for both the spatial and temporal structures permits vast improvements in computational efficiency.
-The choice of a separable space/time model (where the spatial and temporal random effects are modeled independently) also greatly improves computation time but will fail to capture any co-dependencies between these effects.
-
-We model the spatial random effect as a stochastic partial differential equation...
-
-We model the temporal random effect $\omega$ (representing how the mean spatial field evolves in time) as a second-order autoregressive model where
-$$\omega_t = \rho \omega_{t-1}$$
-An AR(2) process was selected due to the observed temporal autocorrelation in the data, which indicates that accumulation retains autocorrelation up to a 2-year lag time.
-
-
-
-The modeling objective, therefore, is to find the joint posterior distribution of the various parameters of interest, permitting inference over the processes governing accumulation in the region and making predictions at unobserved locations possible.
-$$P(\phi, \alpha, \pmb{\beta}, \rho, R_s, \sigma_s \mid \mathbf{Y})$$
-
-
-
 ```{r}
 # More coarse mesh for development purposes
+# mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
+#                     max.edge = c(17000, 100000), cutoff = 500)
 mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
                     max.edge = c(25000, 100000), cutoff = 1000)
 # mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
@@ -186,26 +426,32 @@ f.mod = y ~ -1 + Intercept + #Global intercept
 ```
 
 Run and summarize model
+
 ```{r}
-# Model formula
-mod = inla(f.mod,
-           data = inla.stack.data(dat.stack),
-           family = 'Gamma',
-           control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link=1),
-           # control.inla = list(int.strategy='eb'), #Improves comp time at cost of accuracy/precision
-           control.compute = list(waic=TRUE, config=TRUE))
+# # Model formula
+# mod = inla(f.mod,
+#            data = inla.stack.data(dat.stack),
+#            family = 'Gamma',
+#            control.predictor = list(compute = TRUE, A = inla.stack.A(dat.stack), link=1),
+#            # control.inla = list(int.strategy='eb'), #Improves comp time at cost of accuracy/precision
+#            control.compute = list(waic=TRUE, config=TRUE))
+# 
+# n.iter = 1
+# while (mod$mode$mode.status>0 && n.iter<=3) {
+#   print("Issues with Hessian. Re-running to solve negative eigenalues in the Hessian")
+#   n.iter = n.iter + 1
+#   print(paste("Starting Iteration", n.iter, "of INLA..."))
+#   mod = inla.rerun(mod)
+# }
+# 
+# if (mod$mode$mode.status > 0) {
+#   print("Issues with Hessian eigenvalues persist. Treat model results with suspicion!")
+# }
 
-n.iter = 1
-while (mod$mode$mode.status>0 && n.iter<=3) {
-  print("Issues with Hessian. Re-running to solve negative eigenalues in the Hessian")
-  n.iter = n.iter + 1
-  print(paste("Starting Iteration", n.iter, "of INLA..."))
-  mod = inla.rerun(mod)
-}
+mod = readRDS('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/interim-models/mod.sep.skip3.cut1k.rds')
 
-if (mod$mode$mode.status > 0) {
-  print("Issues with Hessian eigenvalues persist. Treat model results with suspicion!")
-}
+# bru.form = accum ~ Intercept + dem + 
+# bru.test = bru(components = f.mod, )
 ```
 
 ```{r}
@@ -270,6 +516,223 @@ ggplot(posts, aes(x=x,y=y)) + geom_line() +
   theme(text = element_text(size = 20))  
 ```
 
+### Validate model using hold-out test data
+
+```{r}
+# Projector matrix for spatial locations (and indexed on Year for trends)
+A.valid <- inla.spde.make.A(mesh, 
+                         loc=cbind(dat.test$East, dat.test$North), 
+                         weights = dat.test$Year.mod)
+
+# Make data stack
+valid.stack <- inla.stack(
+  data = list(y = dat.test$accum), 
+  A = list(1, 1, 1, A.valid),
+  effects = list(list(Intercept = rep(1, nrow(dat.test))), 
+                 tibble(elev = dat.test$elev, dem=dat.test$dem, 
+                        slope=dat.test$slope, aspect=dat.test$aspect),
+                 list(time = dat.test$Year.mod),
+                 spat.idx),
+  tag = 'valid')
+stack.full = inla.stack(dat.stack, valid.stack)
+
+# Generate estimates at new locations using fitted model.
+mod.valid = inla(f.mod,
+           data = inla.stack.data(stack.full),
+           family = 'Gamma',
+           control.predictor = list(compute = TRUE, A = inla.stack.A(stack.full), link=1),
+           control.compute = list(return.marginals.predictor=TRUE), 
+           # control.compute = list(waic=TRUE, config=TRUE),
+           control.mode = list(theta = mod$mode$theta, restart=FALSE))
+```
+
+Extract predicted variables/values at validation points
+
+```{r}
+idx.valid <- inla.stack.index(stack.full, tag='valid')$data
+
+valid.df = dat.test %>% select(trace_ID, East, North, Year, accum, std, SMB) %>% 
+  mutate(mu.pred=mod.valid$summary.fitted.values$mean[idx.valid], 
+         mu.sd=mod.valid$summary.fitted.values$sd[idx.valid]) %>% 
+  mutate(y.sd=sqrt(mu.pred^2/mod.valid$summary.hyperpar$mean[1]), 
+         log.diff=log(mu.pred/accum))
+
+ggplot(valid.df, aes(x=accum)) + geom_point(aes(y=mu.pred), alpha=0.1) + 
+  geom_point(aes(y=SMB), color='blue', alpha=0.1) + 
+  geom_abline(intercept=0, slope=1, color='red', linetype='dashed')
+
+# Not really the right metric due to heteroskadasticity
+rmse = sqrt(mean((valid.df$accum-valid.df$mu.pred)^2))
+print(paste("RMSE =", format(rmse, digits=3), "mm w.e."))
+```
+
+Direct comparisons for individual trace time series between observed and predicted
+
+```{r}
+
+idx.obs = inla.stack.index(stack.full, tag='dat')$data
+pred.comp = dat.train %>% select(trace_ID, East, North, Year, accum, std, SMB) %>% 
+  mutate(mu.pred=mod.valid$summary.fitted.values$mean[idx.obs]) %>% 
+  mutate(log.diff=log(mu.pred/accum))
+
+ggplot(valid.df, aes(x=Year, y=log.diff, group=trace_ID)) + 
+  geom_line(size=0.1, alpha=0.1) + 
+  # geom_line(data=pred.comp, size=0.1, alpha=0.1, color='red') + 
+  theme(legend.position="none")
+
+ggplot(valid.df, aes(x=log(mu.pred/accum))) + 
+  geom_density(fill='red', alpha=0.1) + 
+  geom_density(data=pred.comp, fill='blue', alpha=0.1)
+```
+
+### Predict at grid locations
+
+```{r}
+pred.bbox = st_bbox(gdf_traces)
+
+stepsize = 1000
+buffer = 5*stepsize
+E.range = round(c(pred.bbox[1]-buffer, pred.bbox[3]+buffer))
+N.range = round(c(pred.bbox[2]-buffer, pred.bbox[4]+buffer))
+
+nxy <- round(c(diff(E.range), diff(N.range)) / stepsize) # Calculate the number of cells in the x and y ranges
+
+# Project the spatial field on the mesh vertices using the inla.mesh.projector() function
+proj.grid <- inla.mesh.projector(mesh,
+                                xlim = E.range,
+                                ylim = N.range,
+                                dims = nxy)
+
+# Find index of grid points within ROI
+grid.pts = tibble(x = proj.grid$lattice$loc[,1],
+                  y = proj.grid$lattice$loc[,2],
+                  idx = 1:nrow(proj.grid$lattice$loc))
+grid.sf = st_as_sf(grid.pts, coords=c('x','y'), crs=st_crs(gdf_traces))
+
+# Import topo data from REMA tiles
+REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m")
+dem = rast(file.path(REMA.dir, "REMA_200m_dem.tif"))
+crs(dem) = st_crs(gdf_traces)$wkt
+slp = rast(file.path(REMA.dir, "REMA_200m_slope.tif"))
+crs(slp) = crs(dem)
+aspct = rast(file.path(REMA.dir, "REMA_200m_aspect.tif"))
+crs(aspct) = crs(dem)
+topo.stk = c(dem, slp, aspct)
+
+# Extract topo covariates from rasters for each grid point
+topo.pts = extract(topo.stk, vect(grid.sf$geometry)) %>% as_tibble() %>%
+  mutate(dem=REMA_200m_dem) %>% select(-REMA_200m_dem)
+
+grid.sf = grid.sf %>% mutate(dem=topo.pts$dem,
+                               slope=topo.pts$slope,
+                               aspect=topo.pts$aspect)
+
+# # Extract clim covariates from rasters for each grid point
+# racmo.pts = extract(racmo.stk, vect(grid.sf$geometry))
+# grid.sf = grid.sf %>% mutate(smb.racmo=racmo.pts$smb,
+#                                u10m=racmo.pts$u10m,
+#                                v10m=racmo.pts$v10m)
+# grid.sf = grid.sf %>% mutate(S_x = abs(slope)*cos(aspect*pi/180),
+#                                    S_y = abs(slope)*sin(aspect*pi/180)) %>%
+#   mutate(MSWD = S_x*u10m + S_y*v10m)
+
+
+trend.proj = inla.mesh.project(proj.grid, mod$summary.random$spat.idx$mean)
+trend.sd = inla.mesh.project(proj.grid, mod$summary.random$spat.idx$sd)
+
+grid.sf = grid.sf %>% mutate(trend=c(trend.proj), trend.sd=c(trend.sd))
+
+```
+
+```{r}
+# pred.bbox = st_bbox(gdf_traces)
+# 
+# stepsize = 15000
+# buffer = 5*stepsize
+# E.range = round(c(pred.bbox[1]-buffer, pred.bbox[3]+buffer))
+# N.range = round(c(pred.bbox[2]-buffer, pred.bbox[4]+buffer))
+# 
+# nxy <- round(c(diff(E.range), diff(N.range)) / stepsize) # Calculate the number of cells in the x and y ranges
+# 
+# # Project the spatial field on the mesh vertices using the inla.mesh.projector() function
+# proj.grid <- inla.mesh.projector(mesh,
+#                                 xlim = E.range,
+#                                 ylim = N.range,
+#                                 dims = nxy)
+# 
+# # Find index of grid points within ROI
+# grid.pts = tibble(x = proj.grid$lattice$loc[,1],
+#                   y = proj.grid$lattice$loc[,2],
+#                   idx = 1:nrow(proj.grid$lattice$loc))
+# grid.sf = st_as_sf(grid.pts, coords=c('x','y'), crs=st_crs(gdf_traces))
+# 
+# # Import topo data from REMA tiles
+# REMA.dir = file.path("/media/durbank/WARP/Research/Antarctica/Data/DEMs/REMA/REMA_200m")
+# dem = rast(file.path(REMA.dir, "REMA_200m_dem.tif"))
+# crs(dem) = st_crs(gdf_traces)$wkt
+# slp = rast(file.path(REMA.dir, "REMA_200m_slope.tif"))
+# crs(slp) = crs(dem)
+# aspct = rast(file.path(REMA.dir, "REMA_200m_aspect.tif"))
+# crs(aspct) = crs(dem)
+# topo.stk = c(dem, slp, aspct)
+# 
+# # Extract topo covariates from rasters for each grid point
+# topo.pts = extract(topo.stk, vect(grid.sf$geometry)) %>% as_tibble() %>% 
+#   mutate(dem=REMA_200m_dem) %>% select(-REMA_200m_dem)
+# 
+# # Center and scale topo data
+# topo.pts = topo.pts %>% 
+#   mutate(dem=dem-mean(data$dem, na.rm=TRUE), slope=slope-mean(data$slope, na.rm=TRUE)) %>%
+#   mutate(dem = dem/sd(data$dem, na.rm=TRUE), slope = slope/sd(data$slope, na.rm=TRUE))
+# 
+# grid.sf = grid.sf %>% mutate(dem=topo.pts$dem, 
+#                                slope=topo.pts$slope, 
+#                                aspect=topo.pts$aspect)
+# 
+# # # Extract clim covariates from rasters for each grid point
+# # racmo.pts = extract(racmo.stk, vect(grid.sf$geometry))
+# # grid.sf = grid.sf %>% mutate(smb.racmo=racmo.pts$smb, 
+# #                                u10m=racmo.pts$u10m, 
+# #                                v10m=racmo.pts$v10m)
+# # grid.sf = grid.sf %>% mutate(S_x = abs(slope)*cos(aspect*pi/180), 
+# #                                    S_y = abs(slope)*sin(aspect*pi/180)) %>% 
+# #   mutate(MSWD = S_x*u10m + S_y*v10m)
+# 
+# 
+# Years = 1975:2015
+# loc.pred = st_coordinates(grid.sf) %x% rep(1, length(Years))
+# yr.mod = rep(Years - mean(data$Year), nrow(grid.sf))
+# st.pred = tibble(X=loc.pred[,1], Y=loc.pred[,2], Year = rep(Years, nrow(grid.sf)), 
+#                  Year.mod = yr.mod, 
+#                  dem=rep(grid.sf$dem, each=length(Years)))
+# 
+# # Define projector matrix for predictions
+# A.pred =  inla.spde.make.A(mesh=mesh,
+#                          loc=cbind(st.pred$X, st.pred$Y),
+#                          weights = st.pred$Year.mod)
+# 
+# # Generate prediction data stack and join to estimation stack
+# pred.stack <- inla.stack(
+#   data = list(y = NA),
+#   A = list(1, 1, 1, A.pred),
+#   effects = list(list(Intercept = rep(1, nrow(st.pred))),
+#                  tibble(dem=st.pred$dem,
+#                         # slope=st.pred$slope, aspect=st.pred$aspect
+#                         ),
+#                  list(time = st.pred$Year.mod),
+#                  spat.idx),
+#   tag = 'pred')
+# stack.all <- inla.stack(dat.stack, pred.stack)
+# 
+# # Generate estimates at new locations using fitted model.
+# mod.pred = inla(f.mod,
+#            data = inla.stack.data(stack.all),
+#            family = 'Gamma',
+#            control.predictor = list(compute = TRUE, A = inla.stack.A(stack.all), link=1),
+#            # control.compute = list(waic=TRUE, config=TRUE), 
+#            control.mode = list(theta = mod$mode$theta, restart=FALSE))
+```
+
 ### Components of prediction
 
 ```{r}
@@ -317,28 +780,12 @@ ggplot(spat.pred, aes(x=X,y=Y, color=fx.RE)) + geom_point() + scale_color_gradie
 ggplot(spat.pred, aes(x=X,y=Y, color=trend)) + geom_point() + scale_color_gradient2()
 ```
 
-Direct comparisons for individual trace time series between observed and predicted
-```{r}
-pred.comp = dat.pred %>% select(color, Year, accum, std, SMB) %>% 
-  right_join(st.pred, by=c("color", "Year")) %>% 
-  mutate(log.diff=log(pred/accum))
-
-ggplot(pred.comp) + 
-  geom_line(aes(x=Year, y=log.diff, group=color), size=0.25, alpha=0.1) + 
-  theme(legend.position="none")
-ggplot(pred.comp) + geom_abline(slope=1, color='black') + 
-  geom_point(aes(x=accum, y=SMB), color='red', alpha=0.1) + 
-  geom_point(aes(x=accum, y=pred), color='blue', alpha=0.1)
-ggplot(pred.comp) + geom_density(aes(x=log(pred/accum)), fill='red', alpha=0.3)
-```
-
-
 ```{r}
 mod.time = tibble(Year=Years, mu=mod$summary.random$time$mean, 
                   sd=mod$summary.random$time$sd)
-tmp = pred.comp %>% group_by(Year) %>% summarize(accum=mean(accum, na.rm=TRUE), pred=mean(pred))
+tmp = pred.comp %>% group_by(Year) %>% summarize(accum=mean(accum, na.rm=TRUE), mu.pred=mean(mu.pred))
 mod.time = mod.time %>% mutate(obs.diff=log(tmp$accum/mean(tmp$accum)), 
-                               pred.diff=log(tmp$pred/mean(tmp$pred)))
+                               pred.diff=log(tmp$mu.pred/mean(tmp$mu.pred)))
 ggplot(mod.time) + geom_hline(yintercept = 0, color='black', linetype="dashed") + 
   geom_ribbon(aes(x=Year, ymin=mu-sd, ymax=mu+sd), fill='red', alpha=0.2) + 
   geom_line(aes(x=Year, y=mu), color='red') +
@@ -346,16 +793,47 @@ ggplot(mod.time) + geom_hline(yintercept = 0, color='black', linetype="dashed") 
   geom_line(aes(x=Year, y=pred.diff), color='purple', alpha=0.5)
 ```
 
+Plots of trend posteriors for random subsets of locations
+
+```{r}
+# Get df of transformed trend marginals
+marg.num = 100
+marg.trend = tibble(X=numeric(), Y=numeric(), IDX=character())
+idx.name = names(mod$marginals.random$spat.idx)
+for (i in 1:length(idx.name)) {
+  marg.i = inla.tmarginal(function(x) x, 
+                          mod$marginals.random$spat.idx[[i]], 
+                          n=marg.num)
+  marg.tbl = tibble(X=marg.i[,1], Y=marg.i[,2], IDX=idx.name[i])
+  marg.trend = marg.trend %>% bind_rows(marg.tbl)
+}
+
+IDX.subset = sample(idx.name, 12)
+ggplot(marg.trend %>% filter(IDX %in% IDX.subset)) +
+  geom_line(aes(x=X, y=Y, group=IDX, color=IDX), alpha=0.5)
+
+IDX.subset = sample_frac(as_tibble(idx.name), 0.1)
+ggplot(marg.trend %>% filter(IDX %in% IDX.subset$value)) +
+  geom_line(aes(x=X, y=Y, group=IDX), alpha=0.1)
+```
+
 Calculate probability that trend is less than zero.
+
 ```{r}
 P.neg = vector(mode = "numeric", length = length(mod$marginals.random$spat.idx))
 for (i in 1:length(P.neg)) {
-  marg.i = inla.tmarginal(function(x) x, 
-                          mod$marginals.random$spat.idx[[i]], 
-                          n=500)
-  P.i = diff(marg.i[,1]) * marg.i[1:(nrow(marg.i)-1),2]
-  P.neg[i] = sum(P.i[which(marg.i[1:(nrow(marg.i)-1),1]<0)])
+  P.neg[i] = inla.pmarginal(0, mod$marginals.random$spat.idx[[i]])
 }
+# P.neg = vector(mode = "numeric", length = length(mod$marginals.random$spat.idx))
+# for (i in 1:length(P.neg)) {
+#   marg.i = inla.tmarginal(function(x) x, 
+#                           mod$marginals.random$spat.idx[[i]], 
+#                           n=500)
+#   P.i = diff(marg.i[,1]) * marg.i[1:(nrow(marg.i)-1),2]
+#   P.neg[i] = sum(P.i[which(marg.i[1:(nrow(marg.i)-1),1]<0)])
+# }
+
+
 tmp = tibble(Source='model', 
              East=mesh$loc[,1], North=mesh$loc[,2], 
              med=mod$summary.random$spat.idx$`0.5quant`, 
@@ -366,6 +844,7 @@ tmp = tibble(Source='model',
 ```
 
 Map of estimated trends with probability of less than zero
+
 ```{r}
 trends.comp = dat.mu %>% select(-trace_ID, -accum, -estimate)  %>% 
   rename(med=log.est) %>% 
@@ -400,7 +879,7 @@ ggplot(trends.comp %>% filter(Source!="data")) + geom_density(aes(x=P.neg), fill
 
 ```{r}
 mod.trends = trends.comp %>% filter(Source=="model")
-Neg.threshold = 0.95
+Neg.threshold = 0.89
 frac.Neg = nrow(mod.trends %>% filter(P.neg>=Neg.threshold))/nrow(mod.trends)
 print(paste(
   format(100*frac.Neg, digits=2), 
@@ -417,5 +896,3 @@ print(paste(
   "% probability of a positive accumulation trend", 
   sep=''))
 ```
-
-
