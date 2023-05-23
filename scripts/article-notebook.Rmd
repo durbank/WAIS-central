@@ -204,7 +204,6 @@ $$P(\phi, \alpha, \pmb{\beta}, \rho, R_s, \sigma_s \mid \mathbf{Y})$$
 
 Estimates of mean annual accumulation (shown in \figref{accum-map}) are similar to those found by \citet{medley_airborneradar_2013} using manually traced IRHs from OIB Snow Radar echograms.
 Accumulation is highest (and exhibits the highest variability) close to coastal West Antarctica and progressively decreases towards the interior.
-%, as observed in numerous prior studies \cite{}.
 Considerable spatial variability, however, overlays this broader signal.
 The most likely source of this higher-order spatial variability is accumulation and wind re-distribution governed by surface topography and near-surface winds \cite{dattler_significant_2019}.
 
