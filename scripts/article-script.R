@@ -250,6 +250,7 @@ add(grid.rast) <- r.tmp
 dem.fx = (as.matrix(grid.rast$DEM, wide=TRUE) - mean(data$dem))/sd(data$dem)
 
 # Construct time random effect array
+Years = 1975:2014
 tmp = replicate(dim(grid.rast)[2], 
                 matrix(rep(mod.valid$summary.random$time$mean,
                            each=dim(grid.rast)[1]),
@@ -257,7 +258,6 @@ tmp = replicate(dim(grid.rast)[2],
 time.RE = aperm(tmp, c(2,3,1))
 
 # Construct linear predictor for each spacetime grid cell
-Years = 1975:2014
 yr.mod = Years - mean(Years)
 lin.est = mod.valid$summary.fixed$mean[1] + 
   mod.valid$summary.fixed$mean[2] * replicate(length(Years), dem.fx) + 

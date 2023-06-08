@@ -1,0 +1,22 @@
+---
+title: "Processing Notebook"
+format: 
+  html:
+    self-contained: true
+editor: source
+---
+
+This notebook contains the processing workflow and instructions in order to reproduce the data, analyses, and plots included in the manuscript.
+
+## Data pre-processing
+
+Some pre-processing, formatting, and data wrangling are required prior to any analyses.
+This includes taking the originally generated data (using PAIPR in MATLAB) and getting it into the proper format for processing in `R` using `INLA`.
+Some of this processing occurs using `Python` scripts and some of it uses `R` scripts.
+Both are detailed in this section.
+
+1. Process the raw data output from PAIPR (performed in `scripts/preprocess.py`)
+2. Compute topographic data necessary for later analyses (performed in `scripts/topo.calc.R`)
+3. Clean the data and re-format for `R` processing (performed in `scripts/Rdata-prep.R`)
+4. Build, run, and validate the `INLA` model (`scripts/inla-model.R`)
+5. 
