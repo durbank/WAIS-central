@@ -26,27 +26,27 @@ gdf_traces = readRDS(here('data/Rdata-gdf_trace.rds'))
 # )
 # gdf_traces = st_crop(gdf_traces, clipper)
 
-# Remove locations with less than 10 years of data
-trace.keep = data.all %>% count(trace_ID) %>% filter(n>=10)
+# Remove locations with less than 12 years of data
+trace.keep = data.all %>% count(trace_ID) %>% filter(n>=12)
 data.all = data.all %>% filter(trace_ID %in% trace.keep$trace_ID)
 gdf_traces = gdf_traces %>% filter(trace_ID %in% trace.keep$trace_ID)
 
-# Subset data to every 5th location (coarsens data to ~2 km)
-skip.int = 10
+# Subset data to every 5th location (coarsens data to ~1 km)
+skip.int = 5
 gdf.idx = seq(1, nrow(gdf_traces), by=skip.int)
 gdf_traces = gdf_traces[gdf.idx,]
 
 # Filter data to subsetted period
-data = data.all %>% filter(trace_ID %in% gdf_traces$trace_ID) %>%
-  filter(Year >= 1975) %>%
-  filter(Year < 2015) %>% arrange(trace_ID, Year)
+data = data.all %>% filter(trace_ID %in% gdf_traces$trace_ID) #%>%
+  # filter(Year >= 1975) %>%
+  # filter(Year < 2015) %>% arrange(trace_ID, Year)
 
 # Remove gdf rows where all data have been filtered out
 gdf_traces = gdf_traces %>% filter(trace_ID %in% data$trace_ID)
 
 # Select variables of interest
-dat = data %>% select(trace_ID, East, North, Year, accum, 
-                      std, SMB, elev, dem, slope, aspect, 
+dat = data %>% select(trace_ID, East, North, Year, accum,
+                      std, SMB, elev, dem, slope, aspect,
                       # u10m, v10m, mu.u10, mu.v10
 )
 
@@ -57,7 +57,8 @@ dat = dat %>%
          # u10m=u10m-mean(u10m, na.rm=TRUE), v10m=v10m-mean(v10m, na.rm=TRUE), 
          # mu.u10=mu.u10-mean(mu.u10, na.rm=TRUE), mu.v10=mu.v10-mean(mu.v10, na.rm=TRUE)
   ) %>% 
-  mutate(Year.mod = Year-mean(1975:2014), Year.idx = (Year-min(Year)+1))
+  mutate(Year.mod = Year-mean(min(dat$Year):max(dat$Year)), 
+         Year.idx = (Year-min(Year)+1))
 # u10m=mean(u10m, na.rm=TRUE), v10m=mean(v10m, na.rm=TRUE))
 
 # Scale covariates by sd
@@ -69,7 +70,7 @@ dat = dat %>%
 
 # Split into training and testing sets
 dat = dat %>% mutate(row.ID = 1:nrow(dat)) %>% relocate(row.ID)
-dat.train = dat %>% slice_sample(prop = 0.80) %>% arrange(row.ID)
+dat.train = dat %>% slice_sample(prop = 0.85) %>% arrange(row.ID)
 dat.test = dat %>% filter(!row.ID %in% dat.train$row.ID)
 
 # Directly calculate linear coefficients of time from raw data.
@@ -84,11 +85,13 @@ dat.mu = dat.train %>% group_by(trace_ID) %>%
 
 ## INLA MODELING
 
-# Mesh grid creation
+# # Mesh grid creation
 # mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
-#                     max.edge = c(17000, 100000), cutoff = 500)
+#                     max.edge = c(12000, 60000), cutoff = 500)
 mesh = inla.mesh.2d(loc = dat.train %>% select(East, North),
-                    max.edge = c(30000, 100000), cutoff = 5000)
+                    max.edge = c(12000, 60000), cutoff = 1000)
+
+
 # plot(mesh)
 # points(dat.train %>% select(East, North), col = "red")
 
@@ -123,7 +126,7 @@ time.spec = list(rho = list(prior = 'pc.cor1', param = c(0.3, 0.95)))
 f.mod = y ~ -1 + Intercept + #Global intercept
   dem + #Fixed effects
   f(time, model = 'ar1', hyper = time.spec) +  #Temporal random effect modeled as AR1
-  f(spat.idx, model = spde) #Spatial randomed effect (indexed by Year)
+  f(spat.idx, model = spde) #Spatial random effect (indexed by Year)
 
 # Run model
 mod = inla(f.mod,
@@ -134,7 +137,7 @@ mod = inla(f.mod,
 
 # Loop model rerun to address issues in Hessian
 n.iter = 1
-while (mod$mode$mode.status>0 && n.iter<=3) {
+while (mod$mode$mode.status>0 && n.iter<=10) {
   print("Issues with Hessian. Re-running to solve negative eigenalues in the Hessian")
   n.iter = n.iter + 1
   print(paste("Starting Iteration", n.iter, "of INLA..."))
@@ -211,7 +214,8 @@ stepsize = 1000
 buffer = 5*stepsize
 E.range = round(c(pred.bbox[1]-buffer, pred.bbox[3]+buffer))
 N.range = round(c(pred.bbox[2]-buffer, pred.bbox[4]+buffer))
-nxy <- round(c(diff(E.range), diff(N.range)) / stepsize) # Calculate the number of cells in the x and y ranges
+nxy <- round(c(diff(E.range), #Calculate the number of cells in the x and y ranges
+               diff(N.range)) / stepsize) 
 
 # Build raster for gridded data
 grid.blank = rast(xmin=E.range[1], xmax=E.range[2], resolution=stepsize, 
@@ -250,7 +254,7 @@ add(grid.rast) <- r.tmp
 dem.fx = (as.matrix(grid.rast$DEM, wide=TRUE) - mean(data$dem))/sd(data$dem)
 
 # Construct time random effect array
-Years = 1975:2014
+Years = min(data$Year):max(data$Year)
 tmp = replicate(dim(grid.rast)[2], 
                 matrix(rep(mod.valid$summary.random$time$mean,
                            each=dim(grid.rast)[1]),
@@ -297,9 +301,19 @@ for (i in 1:dim(lin.est)[3]) {
 
 
 # Save data for later import and plotting in article
-saveRDS(mod.valid, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/interim-models/mod-full.skip10.cut5.rds')
-saveRDS(valid.df, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/dfs/valid.df.rds')
-saveRDS(results.df, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/dfs/results.df.rds')
-writeRaster(grid.rast, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/grid.tif', overwrite=TRUE)
-writeRaster(mu.rast, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/mu.tif', overwrite=TRUE)
-writeRaster(sd.rast, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/sd.tif', overwrite=TRUE)
+saveRDS(
+  mod.valid, 
+  '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/interim-models/mod-full.skip10.cut5.rds'
+)
+saveRDS(valid.df, 
+        '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/dfs/valid.df.rds')
+saveRDS(results.df, 
+        '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/dfs/results.df.rds')
+writeRaster(grid.rast, '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/grid.tif', 
+            overwrite=TRUE)
+writeRaster(mu.rast, 
+            '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/mu.tif', 
+            overwrite=TRUE)
+writeRaster(sd.rast, 
+            '/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/sd.tif', 
+            overwrite=TRUE)

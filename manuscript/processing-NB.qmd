@@ -19,4 +19,105 @@ Both are detailed in this section.
 2. Compute topographic data necessary for later analyses (performed in `scripts/topo.calc.R`)
 3. Clean the data and re-format for `R` processing (performed in `scripts/Rdata-prep.R`)
 4. Build, run, and validate the `INLA` model (`scripts/inla-model.R`)
-5. 
+
+## Analysis
+
+I first import the requisite libraries
+
+```{r}
+library(here)
+library(INLA)
+library(dplyr)
+library(ggplot2)
+library(terra)
+library(colorspace)
+library(sf)
+```
+
+and the model results generated previously.
+
+```{r}
+# Load necessary data for analysis and plotting (generated using `scripts/article-script.R)
+mod.full = readRDS('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/interim-models/mod-full.skip10.cut5.rds')
+valid.df = readRDS('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/dfs/valid.df.rds')
+results.df = readRDS('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/dfs/results.df.rds')
+grid.rast = rast('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/grid.tif')
+mu.rast = rast('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/mu.tif')
+sd.rast = rast('/media/durbank/WARP/Research/Antarctica/WAIS-central/data/rasters/sd.tif')
+```
+
+I define a helper function to transform the posteriors to more intuitive scales for improved plots.
+```{r}
+t.marg = function(mod.marg, t.func, param.names=NULL, n=100) {
+  
+  if (any(class(mod.marg) == "matrix")) {
+    mod.marg = list(mod.marg)
+    if (!is.null(param.names)) {
+      names(mod.marg = param.names)
+    } else {
+      names(mod.marg) = "UNNAMED"
+    }
+  }
+  
+  if (is.null(param.names)) {
+    param.names = names(mod.marg)
+  }
+  
+    if (is.list(t.func) != TRUE) {
+    t.func = list(t.func)
+  }
+  if (length(t.func) == 1) {
+    t.func = rep(t.func, length(param.names))
+  }
+  
+  # Preallocate output tbl
+  out = tibble(x=numeric(), y=numeric(), Param=vector(mode="character"))
+  
+  marg.names = names(mod.marg)
+  
+  for (i in 1:length(marg.names)) {
+    marg.i = inla.tmarginal(t.func[[i]], mod.marg[[marg.names[i]]], n=n)
+    out = out %>% bind_rows(tibble(x=marg.i[,1], y=marg.i[,2], Param=param.names[i]))
+  }
+  return(out)
+}
+```
+
+```{r}
+# Extract parameter posteriors
+marg.fixed = t.marg(mod.full$marginals.fixed, function(x) exp(x))
+HP.names = c("Gamma precision", 
+             "Time precision", "Rho for time", 
+             "Range for spat.idx", "Stdev for spat.idx")
+marg.hyper = t.marg(mod.full$marginals.hyperpar, function(x) (x), param.names = HP.names)
+p.selection = c("Intercept", "dem", "Gamma precision", 
+                "Time precision", "Rho for time", 
+                "Range for spat.idx", "Stdev for spat.idx")
+posts = marg.fixed %>% bind_rows(marg.hyper) %>% filter(Param %in% p.selection)
+```
+
+```{r}
+#| label: fig-ParamPost
+#| fig-cap: "Posterior distributions of model parameters. Blah blah blah."
+ggplot(posts, aes(x=x,y=y)) + geom_line() + 
+  facet_wrap(vars(Param), scales = "free") + 
+  theme(text = element_text(size = 12))  
+```
+
+
+
+
+
+
+
+```{r}
+#| label: fig-trends
+#| fig-cap: "Posterior results for accumulation trends across the region."
+#| fig-subcap: 
+#|   - "Mean trends."
+#|   - "Standard deviation of trends"
+#| layout-ncol: 2
+
+plot(grid.rast$trend)
+plot(grid.rast$trend.sd)
+```
